@@ -7,21 +7,14 @@ from datetime import datetime, date
 # --- 1. SETUP HALAMAN ---
 st.set_page_config(page_title="Dompet Falah", page_icon="💸", layout="wide")
 
-# --- 2. LOGIC NOTIFIKASI (FLASH MESSAGE) ---
-# Ini ditaruh paling atas biar dieksekusi pertama kali setelah refresh
-if 'sukses' in st.session_state and st.session_state.sukses:
-    st.toast("✅ Data Berhasil Masuk! Form sudah bersih.", icon='🚀')
-    # Matikan statusnya biar pas refresh berikutnya gak muncul lagi
-    st.session_state.sukses = False
-
-# --- 3. KONEKSI DATABASE ---
+# --- 2. KONEKSI DATABASE ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
-    """Ambil data fresh tanpa cache (ttl=0)"""
+    """Ambil data dari Google Sheets"""
     try:
+        # ttl=0 biar gak nyimpen cache lama
         df = conn.read(worksheet="Sheet1", usecols=list(range(6)), ttl=0).dropna(how="all")
-        # Cleaning tipe data biar grafik gak error
         df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
         df['Total'] = pd.to_numeric(df['Total'], errors='coerce').fillna(0)
         return df
@@ -29,9 +22,9 @@ def get_data():
         return pd.DataFrame(columns=['Tanggal', 'Akun', 'Kategori', 'Jenis', 'Total', 'Ket'])
 
 def submit_data():
-    """Fungsi ini jalan di background saat tombol ditekan"""
+    """Fungsi Simpan Data (Action)"""
     try:
-        # 1. Ambil data dari Widget (Inputan User)
+        # 1. Bungkus data inputan jadi DataFrame
         new_entry = pd.DataFrame([{
             'Tanggal': st.session_state.widget_date.strftime("%Y-%m-%d"),
             'Akun': st.session_state.widget_wallet,
@@ -41,26 +34,35 @@ def submit_data():
             'Ket': st.session_state.widget_ket
         }])
 
-        # 2. Gabung dengan data lama & Update ke Google Sheets
+        # 2. Kirim ke Google Sheets (Background Process)
         df_old = get_data()
         df_updated = pd.concat([df_old, new_entry], ignore_index=True)
         conn.update(worksheet="Sheet1", data=df_updated)
         
-        # 3. SET SIGNAL SUKSES ("Titip Pesan")
-        # Kita kasih tau session state: "Nanti pas reload, tolong munculin toast ya"
+        # 3. TRIK RAHASIA: Simpan data barusan ke "Memori Sementara"
+        # Biar grafik langsung update tanpa nunggu Google
+        st.session_state.data_barusan = new_entry
         st.session_state.sukses = True
+        
+        # 4. Hapus Cache biar bersih
+        st.cache_data.clear()
         
     except Exception as e:
         st.error(f"Error: {e}")
+
+# --- 3. LOGIC NOTIFIKASI ---
+if 'sukses' in st.session_state and st.session_state.sukses:
+    st.toast("✅ Data Masuk! Grafik sudah update.", icon='🚀')
+    # Jangan langsung di-False-kan disini biar grafiknya sempat render pakai data baru
 
 # --- 4. UI APLIKASI ---
 st.title("💸 Dompet Falah")
 
 tab_input, tab_dash = st.tabs(["➕ Input Data", "📊 Dashboard"])
 
-# === TAB 1: INPUT TRANSAKSI ===
+# === TAB 1: INPUT ===
 with tab_input:
-    # Logic Sticky Date (Biar tanggal gak reset ke hari ini terus)
+    # Logic Sticky Date
     if 'date_default' not in st.session_state:
         st.session_state.date_default = date.today()
 
@@ -69,101 +71,98 @@ with tab_input:
 
     col_tgl, col_dummy = st.columns([1, 2])
     with col_tgl:
-        st.date_input(
-            "Tanggal Transaksi", 
-            value=st.session_state.date_default,
-            key='widget_date', 
-            on_change=update_date_session
-        )
+        st.date_input("Tanggal", value=st.session_state.date_default, key='widget_date', on_change=update_date_session)
 
-    # FORM INPUT (clear_on_submit=True bikin form jadi bersih otomatis)
     with st.form("form_utama", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
             st.selectbox("Wallet", ["OCTO", "Mandiri", "Shopeepay", "Dana", "Cash"], key='widget_wallet')
         with c2:
-            # key='widget_tipe' penting buat logic di bawah
             st.radio("Tipe", ["Pengeluaran", "Pemasukan"], horizontal=True, key='widget_tipe')
         
-        # Logic Dropdown Berubah sesuai Tipe
-        # Kita pakai session_state.get karena saat pertama load, widget belum ada isinya
-        tipe_saat_ini = st.session_state.get('widget_tipe', "Pengeluaran")
-        
-        if tipe_saat_ini == "Pemasukan":
+        # Opsi Kategori
+        tipe = st.session_state.get('widget_tipe', "Pengeluaran")
+        if tipe == "Pemasukan":
              opts = ["Gaji", "Bonus", "Freelance", "Refund"]
         else:
              opts = ["Makan", "Transport", "Kebutuhan Kos", "Belanja", "Tagihan", "Hiburan", "Sedekah", "Lainnya"]
         
         st.selectbox("Kategori Detail", opts, key='widget_jenis')
         st.number_input("Nominal (Rp)", min_value=0, step=5000, key='widget_nominal')
-        st.text_input("Keterangan", key='widget_ket', placeholder="Contoh: Nasi Padang")
+        st.text_input("Keterangan", key='widget_ket')
 
-        # TOMBOL SAKTI
-        # on_click=submit_data artinya: Jalankan fungsi submit dulu, baru reload halaman
+        # Tombol Submit
         st.form_submit_button("Simpan Data 💾", on_click=submit_data)
 
 # === TAB 2: DASHBOARD ===
 with tab_dash:
+    # 1. Ambil Data dari Google Sheets
     df = get_data()
     
+    # 2. LOGIC "OPTIMISTIC UI" (PENTING!)
+    # Jika barusan sukses input, kita TEMPEL MANUAL data barusan ke tabel 
+    # biar user melihatnya seolah-olah instan.
+    if st.session_state.get('sukses') and 'data_barusan' in st.session_state:
+        # Cek apakah data barusan sudah ada di df (biar gak double kalau Google cepet)
+        # Kalau belum ada, kita gabung paksa
+        if not df.empty:
+             df = pd.concat([df, st.session_state.data_barusan], ignore_index=True)
+        else:
+             df = st.session_state.data_barusan
+        
+        # Matikan status sukses setelah render selesai (biar refresh berikutnya murni dari Google)
+        st.session_state.sukses = False 
+    
     if not df.empty:
-        # Tambah kolom bulan/tahun virtual
+        # Tambah kolom helper
         df['Bulan'] = df['Tanggal'].dt.month_name()
         df['Tahun'] = df['Tanggal'].dt.year
         
-        # Auto-select filter berdasarkan data TERAKHIR yang diinput
+        # Filter Default: Ambil dari data TERAKHIR (termasuk yang barusan diinput)
         last_row = df.iloc[-1]
         try:
-            # Coba cari index bulan terakhir
             idx_bln = list(df['Bulan'].unique()).index(last_row['Bulan'])
             idx_thn = list(df['Tahun'].unique()).index(last_row['Tahun'])
         except:
-            idx_bln = 0
-            idx_thn = 0
+            idx_bln = 0; idx_thn = 0
 
         c_fil1, c_fil2 = st.columns(2)
         with c_fil1:
-            pilih_bulan = st.selectbox("Filter Bulan", df['Bulan'].unique(), index=idx_bln)
+            pilih_bulan = st.selectbox("Bulan", df['Bulan'].unique(), index=idx_bln)
         with c_fil2:
-            pilih_tahun = st.selectbox("Filter Tahun", df['Tahun'].unique(), index=idx_thn)
+            pilih_tahun = st.selectbox("Tahun", df['Tahun'].unique(), index=idx_thn)
 
-        # Tampilkan Data sesuai Filter
+        # Filter View
         view = df[(df['Bulan'] == pilih_bulan) & (df['Tahun'] == pilih_tahun)]
         
         if not view.empty:
-            # 1. Ringkasan Angka
+            # Scorecard
             inc = view[view['Kategori'] == 'Pemasukan']['Total'].sum()
             out = view[view['Kategori'] == 'Pengeluaran']['Total'].sum()
             
             m1, m2, m3 = st.columns(3)
-            m1.metric("Pemasukan", f"{inc:,.0f}")
-            m2.metric("Pengeluaran", f"{out:,.0f}")
-            m3.metric("Sisa", f"{inc-out:,.0f}", delta="Net Cashflow")
+            m1.metric("Masuk", f"{inc:,.0f}")
+            m2.metric("Keluar", f"{out:,.0f}")
+            m3.metric("Sisa", f"{inc-out:,.0f}")
             
             st.divider()
             
-            # 2. Grafik Donut (Khusus Pengeluaran)
-            st.subheader(f"Pengeluaran {pilih_bulan} {pilih_tahun}")
+            # Grafik
+            st.subheader(f"Pengeluaran {pilih_bulan}")
             view_out = view[view['Kategori'] == 'Pengeluaran']
             
             if not view_out.empty:
-                # Grouping biar rapi
                 chart_data = view_out.groupby('Jenis')['Total'].sum().reset_index()
-                
                 fig = px.pie(chart_data, values='Total', names='Jenis', hole=0.4, 
                              color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # 3. Tabel Detail
                 st.caption("Rincian Transaksi:")
-                st.dataframe(
-                    view[['Tanggal', 'Jenis', 'Total', 'Ket']].sort_values('Tanggal', ascending=False), 
-                    use_container_width=True, 
-                    hide_index=True
-                )
+                st.dataframe(view[['Tanggal', 'Jenis', 'Total', 'Ket']].sort_values('Tanggal', ascending=False), 
+                             use_container_width=True, hide_index=True)
             else:
-                st.info("Bulan ini belum ada pengeluaran. Hemat pangkal kaya! 🤑")
+                st.info("Belum ada pengeluaran.")
         else:
-            st.warning("Data tidak ditemukan untuk periode ini.")
+            st.warning("Data tidak ditemukan.")
     else:
-        st.info("Database masih kosong.")
+        st.info("Database kosong.")
