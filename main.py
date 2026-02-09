@@ -39,12 +39,11 @@ def submit_data():
         df_updated = pd.concat([df_old, new_entry], ignore_index=True)
         conn.update(worksheet="Sheet1", data=df_updated)
         
-        # 3. TRIK RAHASIA: Simpan data barusan ke "Memori Sementara"
-        # Biar grafik langsung update tanpa nunggu Google
+        # 3. Simpan data barusan ke "Memori Sementara"
         st.session_state.data_barusan = new_entry
         st.session_state.sukses = True
         
-        # 4. Hapus Cache biar bersih
+        # 4. Hapus Cache
         st.cache_data.clear()
         
     except Exception as e:
@@ -53,7 +52,6 @@ def submit_data():
 # --- 3. LOGIC NOTIFIKASI ---
 if 'sukses' in st.session_state and st.session_state.sukses:
     st.toast("✅ Data Masuk! Grafik sudah update.", icon='🚀')
-    # Jangan langsung di-False-kan disini biar grafiknya sempat render pakai data baru
 
 # --- 4. UI APLIKASI ---
 st.title("💸 Dompet Falah")
@@ -76,6 +74,7 @@ with tab_input:
     with st.form("form_utama", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
+            # --- UPDATE DISINI: LIST PEMBAYARAN BARU ---
             st.selectbox("Wallet", ["OCTO", "Mandiri", "Shopeepay", "Dana", "Cash"], key='widget_wallet')
         with c2:
             st.radio("Tipe", ["Pengeluaran", "Pemasukan"], horizontal=True, key='widget_tipe')
@@ -99,26 +98,23 @@ with tab_dash:
     # 1. Ambil Data dari Google Sheets
     df = get_data()
     
-    # 2. LOGIC "OPTIMISTIC UI" (PENTING!)
-    # Jika barusan sukses input, kita TEMPEL MANUAL data barusan ke tabel 
-    # biar user melihatnya seolah-olah instan.
+    # 2. LOGIC "OPTIMISTIC UI"
     if st.session_state.get('sukses') and 'data_barusan' in st.session_state:
-        # Cek apakah data barusan sudah ada di df (biar gak double kalau Google cepet)
-        # Kalau belum ada, kita gabung paksa
         if not df.empty:
              df = pd.concat([df, st.session_state.data_barusan], ignore_index=True)
         else:
              df = st.session_state.data_barusan
         
-        # Matikan status sukses setelah render selesai (biar refresh berikutnya murni dari Google)
         st.session_state.sukses = False 
     
     if not df.empty:
-        # Tambah kolom helper
+        # Konversi Ulang (Penting!)
+        df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+        
         df['Bulan'] = df['Tanggal'].dt.month_name()
         df['Tahun'] = df['Tanggal'].dt.year
         
-        # Filter Default: Ambil dari data TERAKHIR (termasuk yang barusan diinput)
+        # Filter Default
         last_row = df.iloc[-1]
         try:
             idx_bln = list(df['Bulan'].unique()).index(last_row['Bulan'])
