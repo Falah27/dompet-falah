@@ -50,7 +50,7 @@ with tab1:
         # Baris 1
         col1, col2 = st.columns(2)
         with col1:
-            wallet = st.selectbox("Wallet", ["BCA", "Mandiri", "GoPay", "Cash", "Lainnya"])
+            wallet = st.selectbox("Wallet", ["OCTO", "Mandiri", "Shopeepay", "Dana", "Cash"])
         with col2:
             tipe = st.radio("Tipe", ["Pengeluaran", "Pemasukan"], horizontal=True)
 
@@ -122,4 +122,5 @@ with tab2:
         else:
             st.warning("Belum ada pengeluaran di bulan ini.")
     else:
+
         st.info("Data masih kosong.")
