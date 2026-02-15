@@ -478,23 +478,34 @@ elif selected_menu == "📁 Data Lengkap":
         else:
             st.info("Data kosong untuk periode ini.")
 
-    # --- TAB 2: MANAJEMEN UTANG (LOGIC PERBAIKAN TANGGAL) ---
+    # --- TAB 2: MANAJEMEN UTANG (UPDATE METODE BAYAR) ---
     with tab_utang:
-        st.info("💡 Klik status 'Belum Lunas' -> ubah ke 'Lunas' -> Klik tombol Update di bawah.")
+        st.info("💡 Cara Lunasin: Ubah Status ke **'Lunas'** DAN pilih **Metode Pembayaran** (sumber dana). Lalu klik Update.")
         
-        # Filter Global Utang (Semua waktu, karena utang bulan lalu tetap harus dibayar)
+        # Filter Global Utang
         df_unpaid = df[df['Status'] == 'Belum Lunas'].copy()
         
         if not df_unpaid.empty:
+            # Tampilkan Data Editor dengan 2 Kolom yang bisa diedit: Status & Metode
             editor = st.data_editor(
                 df_unpaid,
                 column_config={
-                    "Status": st.column_config.SelectboxColumn(options=["Belum Lunas", "Lunas"], required=True),
+                    "Status": st.column_config.SelectboxColumn(
+                        label="Status Pelunasan",
+                        options=["Belum Lunas", "Lunas"],
+                        required=True
+                    ),
+                    "Metode Pembayaran": st.column_config.SelectboxColumn(
+                        label="Bayar Pakai Apa?",
+                        options=METODE_PEMBAYARAN, # List metode dari config
+                        required=True
+                    ),
                     "Nominal": st.column_config.NumberColumn(format="Rp %d"),
-                    "Tanggal": st.column_config.DateColumn(format="DD MMM YYYY") # Tampilan bersih
+                    "Tanggal": st.column_config.DateColumn(format="DD MMM YYYY")
                 },
+                # HAPUS 'Metode Pembayaran' dari disabled agar bisa diedit
                 disabled=["Tanggal", "Item", "Nominal", "Kategori", "Tipe", "ID"], 
-                column_order=["Tanggal", "Item", "Nominal", "Status", "Kategori"], # ID di-hide juga disini
+                column_order=["Tanggal", "Item", "Nominal", "Status", "Metode Pembayaran"],
                 hide_index=True,
                 use_container_width=True,
                 key="utang_editor"
@@ -505,16 +516,21 @@ elif selected_menu == "📁 Data Lengkap":
                     # 1. Baca Data Asli
                     orig = conn.read(worksheet="Transaksi", ttl=0)
                     
-                    # 2. Normalisasi Tanggal (Buang Jam)
+                    # 2. Normalisasi Tanggal
                     orig['Tanggal_Match'] = pd.to_datetime(orig['Tanggal'], errors='coerce').dt.strftime('%Y-%m-%d')
                     
                     changes_count = 0
                     for i, row in editor.iterrows():
+                        # Cek jika Status Lunas
                         if row['Status'] == 'Lunas':
-                            # Ambil tanggal target dari editor
+                            # Validasi: Pastikan user memilih metode bayar (bukan strip "-")
+                            if row['Metode Pembayaran'] == "-" or row['Metode Pembayaran'] is None:
+                                st.warning(f"⚠️ Harap pilih Metode Pembayaran untuk item: {row['Item']}")
+                                continue # Skip item ini, jangan simpan dulu
+                            
                             target_date = pd.to_datetime(row['Tanggal']).strftime('%Y-%m-%d')
                             
-                            # Matching Logic yang Kuat
+                            # Matching Logic
                             mask = (
                                 (orig['Tanggal_Match'] == target_date) & 
                                 (orig['Item'] == row['Item']) & 
@@ -524,19 +540,20 @@ elif selected_menu == "📁 Data Lengkap":
                             
                             if mask.any():
                                 orig.loc[mask, 'Status'] = 'Lunas'
+                                # UPDATE JUGA METODE PEMBAYARANNYA
+                                orig.loc[mask, 'Metode Pembayaran'] = row['Metode Pembayaran']
                                 changes_count += 1
                     
                     if changes_count > 0:
                         orig = orig.drop(columns=['Tanggal_Match'])
-                        # Simpan tanggal sebagai string bersih YYYY-MM-DD agar konsisten
                         orig['Tanggal'] = pd.to_datetime(orig['Tanggal']).dt.strftime('%Y-%m-%d')
                         
                         conn.update(worksheet="Transaksi", data=orig)
-                        st.toast(f"Berhasil melunasi {changes_count} transaksi!", icon="✅")
+                        st.toast(f"Berhasil melunasi {changes_count} transaksi! Saldo terupdate.", icon="✅")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.warning("Tidak ada perubahan status yang terdeteksi.")
+                        st.warning("Tidak ada perubahan valid yang disimpan.")
                         
                 except Exception as e:
                     st.error(f"Error Update: {e}")
