@@ -6,7 +6,7 @@ from datetime import datetime
 import calendar
 
 # 1. KONFIGURASI HALAMAN
-st.set_page_config(page_title="Budget Bento Pro v10", page_icon="🍱", layout="wide")
+st.set_page_config(page_title="Budget Bento Pro v12", page_icon="🍱", layout="wide")
 
 # --- KONFIGURASI KATEGORI ---
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Investasi", "Penjualan", "Lainnya"]
@@ -23,53 +23,57 @@ st.markdown("""
         background-color: #0e0e0e;
     }
     
-    /* --- BENTO CARDS STYLE --- */
+    /* --- BENTO CARDS --- */
     .bento-card-green, .bento-card-red, .bento-card-dark, .bento-card-warning, .bento-card-blue {
-        height: 160px; 
-        display: flex; 
-        flex-direction: column; 
-        justify-content: center;
-        padding: 25px;
-        border-radius: 24px;
-        margin-bottom: 15px;
+        height: 160px; display: flex; flex-direction: column; justify-content: center;
+        padding: 25px; border-radius: 24px; margin-bottom: 15px;
     }
-
-    .bento-card-green { 
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%); 
-        color: white; 
-        box-shadow: 0 10px 30px rgba(16, 185, 129, 0.2); 
-    }
+    .bento-card-green { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 10px 30px rgba(16, 185, 129, 0.2); }
     .bento-card-red { background: linear-gradient(135deg, #EF4444 0%, #B91C1C 100%); color: white; box-shadow: 0 10px 30px rgba(239, 68, 68, 0.2); }
     .bento-card-dark { background-color: #1a1a1a; color: white; border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3); }
     .bento-card-warning { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); color: white; box-shadow: 0 10px 30px rgba(245, 158, 11, 0.2); }
-    .bento-card-blue { 
-        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); 
-        color: white; 
-        box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2); 
+    .bento-card-blue { background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); color: white; box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2); }
+
+    /* --- WALLET CARD STYLE (NEW) --- */
+    .wallet-card {
+        background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 15px;
+        position: relative;
+        overflow: hidden;
+    }
+    .wallet-card::before {
+        content: ""; position: absolute; top: -50px; right: -50px;
+        width: 100px; height: 100px; background: rgba(255,255,255,0.05);
+        border-radius: 50%;
+    }
+    .wallet-name { font-size: 14px; opacity: 0.7; letter-spacing: 1px; text-transform: uppercase; }
+    .wallet-balance { font-size: 24px; font-weight: 700; margin-top: 5px; color: #fff; }
+    .wallet-chip { 
+        width: 40px; height: 25px; 
+        background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%); 
+        border-radius: 6px; margin-bottom: 15px; opacity: 0.8;
     }
 
-    /* TYPOGRAPHY */
+    /* TYPOGRAPHY & BUTTONS */
     .card-label { font-size: 13px; opacity: 0.9; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
     .card-value { font-size: 28px; font-weight: 700; margin-bottom: 0px;}
     .card-detail { font-size: 12px; opacity: 0.8; margin-top: 5px; }
     
-    /* TOMBOL BIRU */
     div.stButton > button { 
         border-radius: 12px; height: 50px; font-weight: 600; text-transform: uppercase;
         background-color: #2563EB !important; color: white !important; border: none !important;
     }
     div.stButton > button:hover { background-color: #1d4ed8 !important; box-shadow: 0 5px 15px rgba(37, 99, 235, 0.4); }
-
-    /* INPUT FIELDS & EXPANDER */
+    
+    /* SIDEBAR & FORM */
+    section[data-testid="stSidebar"] { background-color: #111; border-right: 1px solid #222; }
     [data-testid="stForm"] { background-color: #161b22; border-radius: 24px; border: 1px solid #30363d; padding: 30px; }
     .streamlit-expanderHeader { background-color: #1a1a1a !important; border-radius: 12px !important; }
-    
-    /* SIDEBAR NAV */
-    section[data-testid="stSidebar"] { background-color: #111; border-right: 1px solid #222; }
-    
-    /* HIDE MENU */
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -78,20 +82,25 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     try:
-        data = conn.read(worksheet="Transaksi", ttl=0)
-        if not data.empty:
-            data['Tanggal'] = pd.to_datetime(data['Tanggal'], errors='coerce')
-            data['Nominal'] = pd.to_numeric(data['Nominal'], errors='coerce').fillna(0)
-            # Pastikan kolom ID ada untuk internal logic (tapi nanti di-hide)
-            if 'ID' not in data.columns: data['ID'] = range(1, len(data) + 1)
-        return data
+        transaksi = conn.read(worksheet="Transaksi", ttl=0)
+        # Pastikan format data konsisten
+        if not transaksi.empty:
+            transaksi['Tanggal'] = pd.to_datetime(transaksi['Tanggal'], errors='coerce')
+            transaksi['Nominal'] = pd.to_numeric(transaksi['Nominal'], errors='coerce').fillna(0)
+        
+        dompet = conn.read(worksheet="Dompet", ttl=0)
+        if not dompet.empty:
+            dompet['Saldo Awal'] = pd.to_numeric(dompet['Saldo Awal'], errors='coerce').fillna(0)
+            
+        return transaksi, dompet
     except Exception as e:
-        return pd.DataFrame()
+        st.error(f"Gagal Load Data: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-df = load_data()
+df, df_wallet_initial = load_data()
 
 # ==========================================
-# 4. SIDEBAR NAVIGATION
+# 4. SIDEBAR NAVIGATION & WALLET MONITORING
 # ==========================================
 with st.sidebar:
     st.title("🍱 Bento Pro")
@@ -99,11 +108,39 @@ with st.sidebar:
     # MENU UTAMA
     selected_menu = st.radio(
         "Menu Aplikasi", 
-        ["🏠 Dashboard", "💰 Budget Planner", "📁 Data Lengkap"],
+        ["🏠 Dashboard", "👛 Dompet Saya", "💰 Budget Planner", "📁 Data Lengkap"],
         index=0
     )
     
     st.divider()
+    
+    # --- MINI MONITORING DI SIDEBAR ---
+    # st.subheader("💳 Info Saldo Cepat")
+    # if not df_wallet_initial.empty:
+    #     # Hitung Saldo Realtime (Saldo Awal + Masuk - Keluar)
+    #     # Grouping transaksi berdasarkan Metode Pembayaran
+    #     wallet_in = df[df['Tipe'] == 'Pemasukan'].groupby('Metode Pembayaran')['Nominal'].sum()
+    #     wallet_out = df[df['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum()
+        
+    #     # Merge dengan Saldo Awal
+    #     realtime_wallets = df_wallet_initial.copy()
+    #     realtime_wallets['Masuk'] = realtime_wallets['Wallet'].map(wallet_in).fillna(0)
+    #     realtime_wallets['Keluar'] = realtime_wallets['Wallet'].map(wallet_out).fillna(0)
+    #     realtime_wallets['Saldo Akhir'] = realtime_wallets['Saldo Awal'] + realtime_wallets['Masuk'] - realtime_wallets['Keluar']
+        
+    #     # Tampilkan list kecil
+    #     if not df_wallet_initial.empty:
+    #     # Menghitung Total Kekayaan dari Saldo Manual
+    #         total_aset_real = df_wallet_initial['Saldo Awal'].sum()
+            
+    #         for index, row in df_wallet_initial.iterrows():
+    #             if row['Saldo Awal'] != 0:
+    #                 st.caption(f"{row['Wallet']}: **Rp {row['Saldo Awal']:,.0f}**")
+            
+    #         st.write("---")
+    #         st.markdown(f"<p style='font-size:14px; font-weight:bold; color:#54A0FF;'>Total Kekayaan: <br>Rp {total_aset_real:,.0f}</p>", unsafe_allow_html=True)
+    
+    # st.divider()
     
     # FILTER GLOBAL
     st.subheader("📅 Filter Periode")
@@ -131,91 +168,53 @@ with st.sidebar:
         selected_month = current_month_name
 
 # ==========================================
-# LOGIC HALAMAN
+# LOGIC SCREEN
 # ==========================================
 
-# ---------------- HALAMAN 1: DASHBOARD ----------------
+# ---------------- SCREEN 1: DASHBOARD ----------------
 if selected_menu == "🏠 Dashboard":
-    st.markdown(f"<h2 style='margin-bottom:20px;'>Dashboard <span style='font-size:16px; opacity:0.5; margin-left:10px'>{selected_month} {selected_year}</span></h2>", unsafe_allow_html=True)
-
+    st.title("🏠 Dashboard Utama")
+    st.markdown(f"<span style='font-size:16px; opacity:0.5; margin-left:10px'>{selected_month} {selected_year}</span>", unsafe_allow_html=True)
     if not df.empty:
-        # 1. HITUNG SALDO GLOBAL (SEMUA WAKTU)
-        # Ini menjawab masalah gajian tgl 25. Sisa uang bulan lalu akan terbawa ke sini.
+        # LOGIKA SALDO UTAMA: MURNI DARI DATA TRANSAKSI (GAJI - PENGELUARAN)
         global_in = df[df['Tipe'] == 'Pemasukan']['Nominal'].sum()
         global_out = df[df['Tipe'] == 'Pengeluaran']['Nominal'].sum()
-        current_balance = global_in - global_out
+        current_balance = global_in - global_out # Saldo murni dari cashflow gaji
         
-        # 2. HITUNG STATISTIK BULANAN (FILTERED)
+        # Filter Bulanan
         mask = (df['Month'] == selected_month) & (df['Year'] == selected_year)
         df_filtered = df.loc[mask]
 
         monthly_in = df_filtered[df_filtered['Tipe'] == 'Pemasukan']['Nominal'].sum()
         monthly_out = df_filtered[df_filtered['Tipe'] == 'Pengeluaran']['Nominal'].sum()
         
-        # Utang (Global Status)
         df_utang = df[df['Status'] == 'Belum Lunas']
         total_utang = df_utang['Nominal'].sum()
 
-        # --- LAYOUT KARTU ---
+        # BENTO CARDS
         c1, c2 = st.columns(2)
-        
-        # KARTU 1: SISA SALDO (GLOBAL / REAL) -> WARNA BIRU (Sesuai request)
         with c1:
-            st.markdown(f"""
-            <div class="bento-card-blue">
-                <div>
-                    <div class="card-label">💰 Sisa Saldo (Real)</div>
-                    <div class="card-value">Rp {current_balance:,.0f}</div>
-                </div>
-                <div class="card-detail">Total uang saat ini (Akumulatif)</div>
-            </div>""", unsafe_allow_html=True)
-            
-        # KARTU 2: PEMASUKAN (BULAN INI) -> WARNA HIJAU (Sesuai request)
+            st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"""
-            <div class="bento-card-green">
-                <div>
-                    <div class="card-label">📈 Pemasukan ({selected_month})</div>
-                    <div class="card-value">+ Rp {monthly_in:,.0f}</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan ({selected_month})</div><div class="card-value">+ Rp {monthly_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
 
         c3, c4 = st.columns(2)
-        
-        # KARTU 3: PENGELUARAN (BULAN INI)
         with c3:
-            st.markdown(f"""
-            <div class="bento-card-red">
-                <div>
-                    <div class="card-label">📉 Pengeluaran ({selected_month})</div>
-                    <div class="card-value">- Rp {monthly_out:,.0f}</div>
-                </div>
-            </div>""", unsafe_allow_html=True)
-            
+            st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">📉 Pengeluaran ({selected_month})</div><div class="card-value">- Rp {monthly_out:,.0f}</div></div></div>""", unsafe_allow_html=True)
             with st.popover("Lihat Rincian Dompet 💳", use_container_width=True):
                 if monthly_out > 0:
                     df_methods = df_filtered[df_filtered['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
                     for _, row in df_methods.iterrows():
                         st.markdown(f"<div style='display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #333;'><span>{row['Metode Pembayaran']}</span><b>Rp {row['Nominal']:,.0f}</b></div>", unsafe_allow_html=True)
                 else:
-                    st.info("Belum ada pengeluaran bulan ini.")
-                    
-        # KARTU 4: UTANG
+                    st.info("Belum ada pengeluaran.")
         with c4:
-            st.markdown(f"""
-            <div class="bento-card-warning">
-                <div>
-                    <div class="card-label">⚠️ Total Tanggungan</div>
-                    <div class="card-value">! Rp {total_utang:,.0f}</div>
-                </div>
-                <div class="card-detail">{len(df_utang)} Transaksi Belum Lunas</div>
-            </div>""", unsafe_allow_html=True)
-            
+            st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">⚠️ Total Tanggungan</div><div class="card-value">! Rp {total_utang:,.0f}</div></div><div class="card-detail">{len(df_utang)} Transaksi Belum Lunas</div></div>""", unsafe_allow_html=True)
     else:
         st.info("Belum ada data transaksi.")
-
+    
     st.write("")
-
+    
     # INPUT TRANSAKSI (Expander)
     if 'input_deskripsi' not in st.session_state: st.session_state['input_deskripsi'] = ""
     if 'input_nominal' not in st.session_state: st.session_state['input_nominal'] = None
@@ -262,126 +261,96 @@ if selected_menu == "🏠 Dashboard":
             st.text_input("Item", key="input_deskripsi", placeholder="Cth: Kopi")
             st.text_area("Ket", key="input_ket", height=100)
         st.button("💾 SIMPAN DATA", type="primary", use_container_width=True, on_click=add_transaction)
-
+    
     st.divider()
-
-    # ANALISIS CEPAT (Di Dashboard)
+    
+    # 3. ANALISIS CEPAT (DENGAN LEGENDA)
+    st.subheader("📊 Analisis Cepat")
     if not df.empty and not df_filtered.empty:
-        
-        # 1. CASH FLOW TREND (Pemasukan vs Pengeluaran Harian)
-        st.subheader("💸 Arus Kas: Pemasukan vs Pengeluaran")
-        
-        # Siapkan data
-        daily_cashflow = df_filtered.groupby(['Tanggal', 'Tipe'])['Nominal'].sum().reset_index()
-        
-        # Grafik Batang Grouped
-        fig_flow = px.bar(
-            daily_cashflow, 
-            x='Tanggal', 
-            y='Nominal', 
-            color='Tipe', 
-            barmode='group',
-            color_discrete_map={'Pemasukan': '#10B981', 'Pengeluaran': '#EF4444'},
-        )
-        fig_flow.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)', 
-            xaxis_title=None, 
-            legend_title=None,
-            hovermode="x unified",
-            height=300
-        )
-        st.plotly_chart(fig_flow, use_container_width=True)
-        
-        st.divider()
-
-        # 2. DUA KOLOM GRAFIK LINGKARAN (KATEGORI & METODE)
-        col_pro1, col_pro2 = st.columns(2)
-        
-        # Kolom Kiri: Kategori (Pie Chart / Donut yang diminta)
-        with col_pro1:
-            st.subheader("📦 Proporsi Kategori")
-            exp_only = df_filtered[df_filtered['Tipe'] == 'Pengeluaran']
+        c1, c2 = st.columns([2,1])
+        with c1:
+            daily = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Tanggal')['Nominal'].sum().reset_index()
+            fig = px.bar(daily, x='Tanggal', y='Nominal', color_discrete_sequence=['#EF4444'])
+            fig.update_layout(xaxis_title=None, yaxis_title=None, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300)
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            cat = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
+            fig2 = px.pie(cat, values='Nominal', names='Kategori', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
             
-            if not exp_only.empty:
-                cat_data = exp_only.groupby('Kategori')['Nominal'].sum().reset_index()
-                
-                # KEMBALI KE PIE CHART (Donut Style)
-                fig_cat = px.pie(
-                    cat_data, 
-                    values='Nominal', 
-                    names='Kategori', 
-                    hole=0.6, # Lubang tengah agar modern
-                    color_discrete_sequence=px.colors.qualitative.Prism
+            # MENGAKTIFKAN LEGENDA & MENGATUR POSISI
+            fig2.update_layout(
+                margin=dict(t=20, b=20, l=0, r=0), 
+                height=350, # Sedikit ditambah agar legenda tidak terpotong
+                showlegend=True,
+                legend=dict(
+                    orientation="h",   # Horizontal
+                    yanchor="bottom", 
+                    y=-0.3,           # Posisi di bawah chart
+                    xanchor="center", 
+                    x=0.5
                 )
-                fig_cat.update_layout(
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    showlegend=True,
-                    legend=dict(orientation="h", y=-0.2), # Legend di bawah
-                    height=300
-                )
-                st.plotly_chart(fig_cat, use_container_width=True)
-            else:
-                st.info("Belum ada pengeluaran.")
-
-        # Kolom Kanan: Metode Pembayaran (Donut juga biar serasi)
-        with col_pro2:
-            st.subheader("💳 Metode Pembayaran")
-            if not exp_only.empty:
-                method_data = exp_only.groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
-                
-                fig_method = px.pie(
-                    method_data, 
-                    values='Nominal', 
-                    names='Metode Pembayaran', 
-                    hole=0.6, 
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
-                fig_method.update_layout(
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    showlegend=True,
-                    legend=dict(orientation="h", y=-0.2),
-                    height=300
-                )
-                st.plotly_chart(fig_method, use_container_width=True)
-            else:
-                st.info("Data kosong.")
-
-        st.divider()
-
-        # 3. SPENDING HEATMAP (ANALISIS HARI)
-        st.subheader("🔥 Intensitas Pengeluaran Harian")
-        st.caption("Semakin merah warnanya, semakin boros kamu di hari tersebut.")
-        
-        if not exp_only.empty:
-            exp_only = exp_only.copy()
-            exp_only['Day'] = exp_only['Tanggal'].dt.day_name()
-            
-            # Urutan Hari
-            days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            
-            # Grouping
-            day_stats = exp_only.groupby('Day')['Nominal'].sum().reindex(days_order).fillna(0).reset_index()
-            
-            # Grafik Batang Gradasi Merah
-            fig_heat = px.bar(
-                day_stats, 
-                x='Day', 
-                y='Nominal',
-                color='Nominal', 
-                color_continuous_scale='Reds'
             )
-            fig_heat.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)', 
-                paper_bgcolor='rgba(0,0,0,0)',
-                xaxis_title=None,
-                coloraxis_showscale=False,
-                height=300
-            )
-            st.plotly_chart(fig_heat, use_container_width=True)
-
+            st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info("Belum ada data transaksi untuk dianalisis.")
+        st.info("Belum ada data untuk dianalisis bulan ini.")
+
+# ---------------- SCREEN 2: DOMPET SAYA (REVISI SALDO MANUAL) ----------------
+elif selected_menu == "👛 Dompet Saya":
+    st.title("👛 Monitoring Dompet")
+    st.markdown("Gunakan halaman ini untuk mencatat saldo fisik di Bank/E-Wallet kamu secara manual.")
+    
+    if not df_wallet_initial.empty:
+        # TAMPILAN KARTU ATM (Hanya mengambil Saldo Awal)
+        # Hitung Total Kekayaan
+        total_aset_real = df_wallet_initial['Saldo Awal'].sum()
+        
+        # Tampilkan Kartu Total Kekayaan (Paling Besar di Atas)
+        st.markdown(f"""
+        <div class="bento-card-blue" style="height: 120px; margin-bottom: 25px; background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);">
+            <div class="card-label" style="color: rgba(255,255,255,0.8);">💎 TOTAL KEKAYAAN (REAL ASET)</div>
+            <div class="card-value" style="font-size: 36px;">Rp {total_aset_real:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("##### Rincian Per Dompet")
+        # TAMPILAN KARTU ATM (Tetap Grid 3 Kolom)
+        cols = st.columns(3)
+        for i, row in df_wallet_initial.iterrows():
+            with cols[i % 3]:
+                st.markdown(f"""
+                <div class="wallet-card">
+                    <div class="wallet-chip"></div>
+                    <div class="wallet-name">{row['Wallet']}</div>
+                    <div class="wallet-balance">Rp {row['Saldo Awal']:,.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+                
+    st.divider()
+    
+    # EDIT SALDO AWAL (MODAL)
+    with st.expander("⚙️ Atur / Update Saldo Dompet", expanded=True):
+        st.info("💡 Masukkan nominal saldo terbaru kamu di sini untuk sinkronisasi manual.")
+        
+        edited_wallets = st.data_editor(
+            df_wallet_initial, 
+            column_config={
+                "Wallet": st.column_config.TextColumn(disabled=True),
+                "Saldo Awal": st.column_config.NumberColumn("Input Saldo Manual", format="Rp %d", required=True)
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="wallet_editor_final"
+        )
+        
+        if st.button("💾 Simpan Saldo Terbaru", type="primary"):
+            try:
+                conn.update(worksheet="Dompet", data=edited_wallets)
+                st.toast("Saldo dompet berhasil diperbarui!", icon="✅")
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Gagal update: {e}")
 
 # ---------------- HALAMAN 2: BUDGET PLANNER ----------------
 elif selected_menu == "💰 Budget Planner":
