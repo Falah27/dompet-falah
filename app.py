@@ -12,6 +12,7 @@ st.set_page_config(page_title="Budget Bento Pro v12", page_icon="🍱", layout="
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Investasi", "Penjualan", "Lainnya"]
 KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Lainnya"]
 METODE_PEMBAYARAN = ["Cash", "Livin (Mandiri)", "Octo (CIMB)", "DANA", "Shopeepay", "Kartu Kredit"]
+START_DATE_MONITORING = "2026-02-18"
 
 # 2. CUSTOM CSS
 st.markdown("""
@@ -83,18 +84,17 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def load_data():
     try:
         transaksi = conn.read(worksheet="Transaksi", ttl=0)
-        # Pastikan format data konsisten
+        dompet = conn.read(worksheet="Dompet", ttl=0)
+        
         if not transaksi.empty:
             transaksi['Tanggal'] = pd.to_datetime(transaksi['Tanggal'], errors='coerce')
             transaksi['Nominal'] = pd.to_numeric(transaksi['Nominal'], errors='coerce').fillna(0)
         
-        dompet = conn.read(worksheet="Dompet", ttl=0)
         if not dompet.empty:
             dompet['Saldo Awal'] = pd.to_numeric(dompet['Saldo Awal'], errors='coerce').fillna(0)
             
         return transaksi, dompet
     except Exception as e:
-        st.error(f"Gagal Load Data: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 df, df_wallet_initial = load_data()
@@ -294,59 +294,75 @@ if selected_menu == "🏠 Dashboard":
     else:
         st.info("Belum ada data untuk dianalisis bulan ini.")
 
-# ---------------- SCREEN 2: DOMPET SAYA (REVISI SALDO MANUAL) ----------------
+# ---------------- SCREEN 2: DOMPET SAYA (LIVE WALLET START NEW) ----------------
 elif selected_menu == "👛 Dompet Saya":
     st.title("👛 Monitoring Dompet")
-    st.markdown("Gunakan halaman ini untuk mencatat saldo fisik di Bank/E-Wallet kamu secara manual.")
+    st.info(f"Sistem mulai menghitung transaksi otomatis sejak: **{START_DATE_MONITORING}**")
     
     if not df_wallet_initial.empty:
-        # TAMPILAN KARTU ATM (Hanya mengambil Saldo Awal)
-        # Hitung Total Kekayaan
-        total_aset_real = df_wallet_initial['Saldo Awal'].sum()
+        # 1. FILTER TRANSAKSI HANYA YANG BARU (Mulai dari Start Date)
+        df_new_trans = df[df['Tanggal'] >= START_DATE_MONITORING]
         
-        # Tampilkan Kartu Total Kekayaan (Paling Besar di Atas)
+        wallet_in = df_new_trans[df_new_trans['Tipe'] == 'Pemasukan'].groupby('Metode Pembayaran')['Nominal'].sum()
+        wallet_out = df_new_trans[df_new_trans['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum()
+        
+        # 2. GABUNGKAN DENGAN SALDO AWAL
+        live_wallets = df_wallet_initial.copy()
+        live_wallets['Total Masuk'] = live_wallets['Wallet'].map(wallet_in).fillna(0)
+        live_wallets['Total Keluar'] = live_wallets['Wallet'].map(wallet_out).fillna(0)
+        
+        # RUMUS: Saldo Sekarang = Saldo Input Hari Ini + Transaksi Baru
+        live_wallets['Saldo Sekarang'] = (
+            live_wallets['Saldo Awal'] + 
+            live_wallets['Total Masuk'] - 
+            live_wallets['Total Keluar']
+        )
+        
+        # 3. TOTAL KEKAYAAN
+        total_aset_real = live_wallets['Saldo Sekarang'].sum()
         st.markdown(f"""
-        <div class="bento-card-blue" style="height: 120px; margin-bottom: 25px; background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);">
-            <div class="card-label" style="color: rgba(255,255,255,0.8);">💎 TOTAL KEKAYAAN (REAL ASET)</div>
+        <div class="bento-card-blue" style="height: 120px; margin-bottom: 25px;">
+            <div class="card-label">💎 TOTAL KEKAYAAN SAAT INI</div>
             <div class="card-value" style="font-size: 36px;">Rp {total_aset_real:,.0f}</div>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("##### Rincian Per Dompet")
-        # TAMPILAN KARTU ATM (Tetap Grid 3 Kolom)
+        # 4. KARTU DOMPET
         cols = st.columns(3)
-        for i, row in df_wallet_initial.iterrows():
+        for i, row in live_wallets.iterrows():
             with cols[i % 3]:
                 st.markdown(f"""
                 <div class="wallet-card">
                     <div class="wallet-chip"></div>
                     <div class="wallet-name">{row['Wallet']}</div>
-                    <div class="wallet-balance">Rp {row['Saldo Awal']:,.0f}</div>
+                    <div class="wallet-balance">Rp {row['Saldo Sekarang']:,.0f}</div>
+                    <div style="font-size:10px; opacity:0.5; margin-top:5px;">
+                        Initial Reset: {START_DATE_MONITORING}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-        
-                
+
     st.divider()
     
-    # EDIT SALDO AWAL (MODAL)
-    with st.expander("⚙️ Atur / Update Saldo Dompet", expanded=True):
-        st.info("💡 Masukkan nominal saldo terbaru kamu di sini untuk sinkronisasi manual.")
+    # 5. PENGATURAN SALDO AWAL (HANYA UNTUK SETTING PERTAMA KALI)
+    with st.expander("⚙️ Atur Saldo Awal (Gunakan saat baru pakai app / sinkron ulang)"):
+        st.info("Input saldo yang kamu pegang saat ini. Selanjutnya biarkan aplikasi yang menghitung otomatis.")
         
         edited_wallets = st.data_editor(
             df_wallet_initial, 
             column_config={
                 "Wallet": st.column_config.TextColumn(disabled=True),
-                "Saldo Awal": st.column_config.NumberColumn("Input Saldo Manual", format="Rp %d", required=True)
+                "Saldo Awal": st.column_config.NumberColumn("Saldo Saat Ini", format="Rp %d", required=True)
             },
             hide_index=True,
             use_container_width=True,
-            key="wallet_editor_final"
+            key="wallet_editor_live"
         )
         
-        if st.button("💾 Simpan Saldo Terbaru", type="primary"):
+        if st.button("💾 Simpan & Reset Perhitungan", type="primary"):
             try:
                 conn.update(worksheet="Dompet", data=edited_wallets)
-                st.toast("Saldo dompet berhasil diperbarui!", icon="✅")
+                st.toast("Saldo awal berhasil diupdate!", icon="✅")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
