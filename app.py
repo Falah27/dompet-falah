@@ -10,7 +10,7 @@ st.set_page_config(page_title="Budget Bento Pro v12", page_icon="🍱", layout="
 
 # --- KONFIGURASI KATEGORI ---
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Investasi", "Penjualan", "Lainnya"]
-KATEGORI_PENGELUARAN = ["Makan", "Transport", "Hiburan", "Tagihan", "Belanja", "Kesehatan", "Pendidikan", "Amal", "Lainnya"]
+KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Lainnya"]
 METODE_PEMBAYARAN = ["Cash", "Livin (Mandiri)", "Octo (CIMB)", "DANA", "Shopeepay", "Kartu Kredit"]
 
 # 2. CUSTOM CSS
