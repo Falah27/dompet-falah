@@ -264,35 +264,50 @@ if selected_menu == "🏠 Dashboard":
     
     st.divider()
     
-    # 3. ANALISIS CEPAT (DENGAN LEGENDA)
-    st.subheader("📊 Analisis Cepat")
-    if not df.empty and not df_filtered.empty:
-        c1, c2 = st.columns([2,1])
-        with c1:
-            daily = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Tanggal')['Nominal'].sum().reset_index()
-            fig = px.bar(daily, x='Tanggal', y='Nominal', color_discrete_sequence=['#EF4444'])
-            fig.update_layout(xaxis_title=None, yaxis_title=None, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300)
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            cat = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
-            fig2 = px.pie(cat, values='Nominal', names='Kategori', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
-            
-            # MENGAKTIFKAN LEGENDA & MENGATUR POSISI
-            fig2.update_layout(
-                margin=dict(t=20, b=20, l=0, r=0), 
-                height=350, # Sedikit ditambah agar legenda tidak terpotong
-                showlegend=True,
-                legend=dict(
-                    orientation="h",   # Horizontal
-                    yanchor="bottom", 
-                    y=-0.3,           # Posisi di bawah chart
-                    xanchor="center", 
-                    x=0.5
-                )
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("Belum ada data untuk dianalisis bulan ini.")
+# --- REVISI GRAFIK ANALISIS CEPAT ---
+st.subheader("📊 Analisis Cepat")
+if not df.empty and not df_filtered.empty:
+    c1, c2 = st.columns([2,1])
+    with c1:
+        # 1. Siapkan data harian untuk Pemasukan & Pengeluaran
+        # Kita melakukan grouping berdasarkan Tanggal dan Tipe
+        daily_stats = df_filtered.groupby(['Tanggal', 'Tipe'])['Nominal'].sum().reset_index()
+        
+        # 2. Buat Grouped Bar Chart
+        fig = px.bar(
+            daily_stats, 
+            x='Tanggal', 
+            y='Nominal', 
+            color='Tipe',           # Memisahkan warna berdasarkan tipe
+            barmode='group',        # Membuat grafik batang berdampingan
+            color_discrete_map={    # Mengatur warna spesifik
+                'Pemasukan': '#10B981', 
+                'Pengeluaran': '#EF4444'
+            }
+        )
+        
+        fig.update_layout(
+            xaxis_title=None, 
+            yaxis_title=None, 
+            plot_bgcolor='rgba(0,0,0,0)', 
+            paper_bgcolor='rgba(0,0,0,0)', 
+            height=300,
+            showlegend=False,       # Sembunyikan legenda jika ingin tampilan clean
+            hovermode="x unified"    # Menampilkan tooltip gabungan yang keren
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+    with c2:
+        # Pie chart kategori pengeluaran tetap sama seperti sebelumnya
+        cat = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
+        fig2 = px.pie(cat, values='Nominal', names='Kategori', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
+        fig2.update_layout(
+            margin=dict(t=20, b=20, l=0, r=0), 
+            height=350, 
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
 # ---------------- SCREEN 2: DOMPET SAYA (LIVE WALLET START NEW) ----------------
 elif selected_menu == "👛 Dompet Saya":
