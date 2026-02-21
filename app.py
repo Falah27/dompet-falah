@@ -114,34 +114,6 @@ with st.sidebar:
     
     st.divider()
     
-    # --- MINI MONITORING DI SIDEBAR ---
-    # st.subheader("💳 Info Saldo Cepat")
-    # if not df_wallet_initial.empty:
-    #     # Hitung Saldo Realtime (Saldo Awal + Masuk - Keluar)
-    #     # Grouping transaksi berdasarkan Metode Pembayaran
-    #     wallet_in = df[df['Tipe'] == 'Pemasukan'].groupby('Metode Pembayaran')['Nominal'].sum()
-    #     wallet_out = df[df['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum()
-        
-    #     # Merge dengan Saldo Awal
-    #     realtime_wallets = df_wallet_initial.copy()
-    #     realtime_wallets['Masuk'] = realtime_wallets['Wallet'].map(wallet_in).fillna(0)
-    #     realtime_wallets['Keluar'] = realtime_wallets['Wallet'].map(wallet_out).fillna(0)
-    #     realtime_wallets['Saldo Akhir'] = realtime_wallets['Saldo Awal'] + realtime_wallets['Masuk'] - realtime_wallets['Keluar']
-        
-    #     # Tampilkan list kecil
-    #     if not df_wallet_initial.empty:
-    #     # Menghitung Total Kekayaan dari Saldo Manual
-    #         total_aset_real = df_wallet_initial['Saldo Awal'].sum()
-            
-    #         for index, row in df_wallet_initial.iterrows():
-    #             if row['Saldo Awal'] != 0:
-    #                 st.caption(f"{row['Wallet']}: **Rp {row['Saldo Awal']:,.0f}**")
-            
-    #         st.write("---")
-    #         st.markdown(f"<p style='font-size:14px; font-weight:bold; color:#54A0FF;'>Total Kekayaan: <br>Rp {total_aset_real:,.0f}</p>", unsafe_allow_html=True)
-    
-    # st.divider()
-    
     # FILTER GLOBAL
     st.subheader("📅 Filter Periode")
     now = datetime.now()
@@ -175,6 +147,7 @@ with st.sidebar:
 if selected_menu == "🏠 Dashboard":
     st.title("🏠 Dashboard Utama")
     st.markdown(f"<span style='font-size:16px; opacity:0.5; margin-left:10px'>{selected_month} {selected_year}</span>", unsafe_allow_html=True)
+    
     if not df.empty:
         # LOGIKA SALDO UTAMA: MURNI DARI DATA TRANSAKSI (GAJI - PENGELUARAN)
         global_in = df[df['Tipe'] == 'Pemasukan']['Nominal'].sum()
@@ -212,6 +185,7 @@ if selected_menu == "🏠 Dashboard":
             st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">⚠️ Total Tanggungan</div><div class="card-value">! Rp {total_utang:,.0f}</div></div><div class="card-detail">{len(df_utang)} Transaksi Belum Lunas</div></div>""", unsafe_allow_html=True)
     else:
         st.info("Belum ada data transaksi.")
+        df_filtered = pd.DataFrame() # Pengaman jika data kosong
     
     st.write("")
     
@@ -264,50 +238,52 @@ if selected_menu == "🏠 Dashboard":
     
     st.divider()
     
-# --- REVISI GRAFIK ANALISIS CEPAT ---
-st.subheader("📊 Analisis Cepat")
-if not df.empty and not df_filtered.empty:
-    c1, c2 = st.columns([2,1])
-    with c1:
-        # 1. Siapkan data harian untuk Pemasukan & Pengeluaran
-        # Kita melakukan grouping berdasarkan Tanggal dan Tipe
-        daily_stats = df_filtered.groupby(['Tanggal', 'Tipe'])['Nominal'].sum().reset_index()
-        
-        # 2. Buat Grouped Bar Chart
-        fig = px.bar(
-            daily_stats, 
-            x='Tanggal', 
-            y='Nominal', 
-            color='Tipe',           # Memisahkan warna berdasarkan tipe
-            barmode='group',        # Membuat grafik batang berdampingan
-            color_discrete_map={    # Mengatur warna spesifik
-                'Pemasukan': '#10B981', 
-                'Pengeluaran': '#EF4444'
-            }
-        )
-        
-        fig.update_layout(
-            xaxis_title=None, 
-            yaxis_title=None, 
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)', 
-            height=300,
-            showlegend=False,       # Sembunyikan legenda jika ingin tampilan clean
-            hovermode="x unified"    # Menampilkan tooltip gabungan yang keren
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-    with c2:
-        # Pie chart kategori pengeluaran tetap sama seperti sebelumnya
-        cat = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
-        fig2 = px.pie(cat, values='Nominal', names='Kategori', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
-        fig2.update_layout(
-            margin=dict(t=20, b=20, l=0, r=0), 
-            height=350, 
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+    # --- REVISI GRAFIK ANALISIS CEPAT --- (Sekarang aman di dalam Scope Dashboard)
+    st.subheader("📊 Analisis Cepat")
+    if not df.empty and not df_filtered.empty:
+        c_graph1, c_graph2 = st.columns([2,1])
+        with c_graph1:
+            # 1. Siapkan data harian untuk Pemasukan & Pengeluaran
+            daily_stats = df_filtered.groupby(['Tanggal', 'Tipe'])['Nominal'].sum().reset_index()
+            
+            # 2. Buat Grouped Bar Chart
+            fig = px.bar(
+                daily_stats, 
+                x='Tanggal', 
+                y='Nominal', 
+                color='Tipe',           # Memisahkan warna berdasarkan tipe
+                barmode='group',        # Membuat grafik batang berdampingan
+                color_discrete_map={    # Mengatur warna spesifik
+                    'Pemasukan': '#10B981', 
+                    'Pengeluaran': '#EF4444'
+                }
+            )
+            
+            fig.update_layout(
+                xaxis_title=None, 
+                yaxis_title=None, 
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)', 
+                height=300,
+                showlegend=False,       # Sembunyikan legenda jika ingin tampilan clean
+                hovermode="x unified"   # Menampilkan tooltip gabungan yang keren
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with c_graph2:
+            # Pie chart kategori pengeluaran tetap sama seperti sebelumnya
+            cat = df_filtered[df_filtered['Tipe']=='Pengeluaran'].groupby('Kategori')['Nominal'].sum().reset_index()
+            if not cat.empty: # Tambahan pengaman agar tidak error jika tidak ada pengeluaran
+                fig2 = px.pie(cat, values='Nominal', names='Kategori', hole=0.6, color_discrete_sequence=px.colors.qualitative.Prism)
+                fig2.update_layout(
+                    margin=dict(t=20, b=20, l=0, r=0), 
+                    height=350, 
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.caption("Belum ada data pengeluaran untuk chart ini.")
 
 # ---------------- SCREEN 2: DOMPET SAYA (LIVE WALLET START NEW) ----------------
 elif selected_menu == "👛 Dompet Saya":
