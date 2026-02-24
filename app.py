@@ -210,6 +210,12 @@ if selected_menu == "🏠 Dashboard":
         st.toast(f"✅ Tersimpan: {st.session_state['sukses_simpan']}", icon="🍱")
         del st.session_state['sukses_simpan']
 
+    # --- INISIALISASI STATE KOSONG ---
+    # Memastikan form benar-benar kosong saat pertama kali dibuka
+    if 'in_nom' not in st.session_state: st.session_state['in_nom'] = None
+    if 'in_desk' not in st.session_state: st.session_state['in_desk'] = ""
+    if 'in_ket' not in st.session_state: st.session_state['in_ket'] = ""
+
     # INPUT TRANSAKSI (DINAMIS & CEPAT)
     with st.expander("📝 Input Transaksi Baru", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -223,15 +229,18 @@ if selected_menu == "🏠 Dashboard":
             input_status = st.radio("Status", ["Lunas", "Belum Lunas"], horizontal=True, key="in_stat")
             is_disabled = (input_status == "Belum Lunas")
             input_metode = st.selectbox("Metode", METODE_PEMBAYARAN, disabled=is_disabled, key="in_met")
-            input_nominal = st.number_input("Nominal (Rp)", min_value=0, step=1000, value=0, key="in_nom")
+            
+            # --- PERBAIKAN 1: value=None agar kotak nominal kosong ---
+            input_nominal = st.number_input("Nominal (Rp)", min_value=0, step=1000, value=None, key="in_nom")
             
         with c3:
             input_deskripsi = st.text_input("Item", placeholder="Cth: Kopi / Gaji", key="in_desk")
             input_ket = st.text_area("Ket", height=100, key="in_ket")
             
         if st.button("💾 SIMPAN DATA", type="primary", use_container_width=True):
-            if not input_deskripsi or input_nominal <= 0:
-                st.error("⚠️ Gagal: Nama Item harus diisi dan Nominal harus lebih dari 0!")
+            # Cek juga kalau nominal masih None (kosong)
+            if not input_deskripsi or input_nominal is None or input_nominal <= 0:
+                st.error("⚠️ Gagal: Nama Item harus diisi dan Nominal harus diisi lebih dari 0!")
             else:
                 try:
                     current_df = conn.read(worksheet="Transaksi", ttl=0) 
@@ -246,9 +255,11 @@ if selected_menu == "🏠 Dashboard":
                     conn.update(worksheet="Transaksi", data=updated_df)
                     
                     st.session_state['sukses_simpan'] = input_deskripsi
-                    del st.session_state['in_nom']
-                    del st.session_state['in_desk']
-                    del st.session_state['in_ket']
+                    
+                    # --- PERBAIKAN 2: Timpa data dengan kosong agar langsung bersih ---
+                    st.session_state['in_nom'] = None
+                    st.session_state['in_desk'] = ""
+                    st.session_state['in_ket'] = ""
                     
                     st.cache_data.clear()
                     st.rerun()
