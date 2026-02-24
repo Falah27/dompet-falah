@@ -470,55 +470,7 @@ elif selected_menu == "📁 Data Lengkap":
     else:
         df_filtered_view = pd.DataFrame()
 
-    tab_tabel, tab_utang = st.tabs(["📋 Tabel Transaksi (Edit & Hapus)", "💸 Kelola Utang"])
-
-    # --- TABEL TRANSAKSI (EDIT & HAPUS DATA) ---
-    with tab_tabel:
-        st.info("💡 **Cara Edit:** Klik sel untuk mengubah teks. **Cara Hapus:** Geser tabel ke kanan, centang kotak paling kiri, lalu klik ikon 🗑️ di atas tabel. Jangan lupa klik Simpan.")
-        
-        if not df_filtered_view.empty:
-            cols_to_show = ["Tanggal", "Item", "Kategori", "Nominal", "Tipe", "Status", "Keterangan", "Metode Pembayaran"]
-            df_to_edit = df_filtered_view[cols_to_show].copy()
-            semua_kategori = list(dict.fromkeys(KATEGORI_PEMASUKAN + KATEGORI_PENGELUARAN))
-            
-            edited_df = st.data_editor(
-                df_to_edit,
-                column_config={
-                    "Tanggal": st.column_config.DateColumn("Tanggal", format="DD MMM YYYY", required=True),
-                    "Nominal": st.column_config.NumberColumn("Nominal", format="Rp %d", required=True),
-                    "Tipe": st.column_config.SelectboxColumn("Tipe", options=["Pemasukan", "Pengeluaran"], required=True),
-                    "Kategori": st.column_config.SelectboxColumn("Kategori", options=semua_kategori, required=True),
-                    "Status": st.column_config.SelectboxColumn("Status", options=["Lunas", "Belum Lunas"], required=True),
-                    "Metode Pembayaran": st.column_config.SelectboxColumn("Metode", options=["-"] + METODE_PEMBAYARAN, required=True)
-                },
-                num_rows="dynamic",
-                hide_index=False,
-                use_container_width=True,
-                key="editor_transaksi_lengkap"
-            )
-            
-            if st.button("💾 Simpan Perubahan Data", type="primary"):
-                try:
-                    orig = conn.read(worksheet="Transaksi", ttl=0)
-                    orig['Tanggal_Parsed'] = pd.to_datetime(orig['Tanggal'], errors='coerce')
-                    
-                    mask_orig = (orig['Tanggal_Parsed'].dt.month_name() == selected_month) & (orig['Tanggal_Parsed'].dt.year == selected_year)
-                    orig_kept = orig[~mask_orig].copy().drop(columns=['Tanggal_Parsed'])
-                    
-                    edited_clean = edited_df.copy()
-                    edited_clean['Tanggal'] = pd.to_datetime(edited_clean['Tanggal']).dt.strftime('%Y-%m-%d')
-                    
-                    final_df = pd.concat([orig_kept, edited_clean], ignore_index=True)
-                    conn.update(worksheet="Transaksi", data=final_df)
-                    st.toast("✅ Perubahan tabel berhasil disimpan!", icon="🍱")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal menyimpan: {e}")
-                    
-            st.divider()
-            
-            # --- FITUR E-STATEMENT PDF (ALA M-BANKING) ---
+    # --- FITUR E-STATEMENT PDF (ALA M-BANKING) ---
     if not df_filtered_view.empty:
         st.markdown("### 📥 Download E-Statement (PDF)")
         st.caption(f"Cetak laporan resmi keuanganmu ala Bank untuk bulan {selected_month} {selected_year}.")
@@ -528,29 +480,24 @@ elif selected_menu == "📁 Data Lengkap":
             pdf.add_page()
             pdf.set_auto_page_break(auto=True, margin=15)
             
-            # --- HEADER (Mirip Kop Surat Bank) ---
             pdf.set_font("Arial", 'B', 16)
-            pdf.set_text_color(37, 99, 235) # Biru Bento
+            pdf.set_text_color(37, 99, 235)
             pdf.cell(0, 8, "BENTO PRO BY STREAMLIT", ln=True, align='R')
             pdf.set_font("Arial", '', 10)
             pdf.set_text_color(100, 100, 100)
             pdf.cell(0, 5, "PERSONAL FINANCE STATEMENT", ln=True, align='R')
             pdf.ln(5)
             
-            # --- JUDUL & PERIODE ---
             pdf.set_font("Arial", 'B', 12)
             pdf.set_text_color(0, 0, 0)
             pdf.cell(0, 6, "Laporan Rekening / Statement of Account", ln=True, align='L')
             
-            # Cari tanggal terakhir di bulan tsb
             month_idx = list(calendar.month_name).index(month)
             last_day = calendar.monthrange(int(year), month_idx)[1]
-            
             pdf.set_font("Arial", '', 10)
             pdf.cell(0, 6, f"Periode: 01 {month} {year} - {last_day} {month} {year}", ln=True, align='L')
             pdf.ln(5)
             
-            # --- INFO AKUN ---
             pdf.set_font("Arial", '', 10)
             pdf.cell(30, 6, "Jenis Produk", border=0)
             pdf.cell(0, 6, ": Bento Finance Tracker", border=0, ln=True)
@@ -560,35 +507,27 @@ elif selected_menu == "📁 Data Lengkap":
             pdf.cell(0, 6, ": IDR", border=0, ln=True)
             pdf.ln(5)
             
-            # --- TABLE HEADER ---
             pdf.set_font("Arial", 'B', 9)
             pdf.set_fill_color(37, 99, 235)
             pdf.set_text_color(255, 255, 255)
             pdf.cell(20, 8, "Tanggal", border=1, fill=True, align='C')
             pdf.cell(75, 8, "Deskripsi", border=1, fill=True, align='C')
-            pdf.cell(30, 8, "Pengeluaran", border=1, fill=True, align='C')
-            pdf.cell(30, 8, "Pemasukan", border=1, fill=True, align='C')
+            pdf.cell(30, 8, "Debit", border=1, fill=True, align='C')
+            pdf.cell(30, 8, "Kredit", border=1, fill=True, align='C')
             pdf.cell(35, 8, "Saldo", border=1, fill=True, align='C')
             pdf.ln()
             
-            # --- SORT DATA: Dari tanggal terlama ke terbaru (Chronological) ---
             df_sorted = df_laporan.sort_values('Tanggal', ascending=True).copy()
-            
-            # --- ISI TABEL ---
             pdf.set_font("Arial", '', 8)
             pdf.set_text_color(0, 0, 0)
-            
             running_balance = 0
             total_kredit = 0
             total_debit = 0
             
             for i, row in df_sorted.iterrows():
                 tgl = pd.to_datetime(row['Tanggal']).strftime('%d/%m/%Y')
-                
-                # Format Deskripsi: Item + Metode
                 desc_raw = f"{row['Item']} ({row['Metode Pembayaran']})"
-                desc = desc_raw[:45] # Potong teks kepanjangan agar tidak keluar kotak
-                
+                desc = desc_raw[:45] 
                 debit_str = ""
                 kredit_str = ""
                 
@@ -604,8 +543,6 @@ elif selected_menu == "📁 Data Lengkap":
                     running_balance += nom
                     
                 saldo_str = f"{running_balance:,.2f}"
-                
-                # Print Row
                 pdf.cell(20, 7, tgl, border=1, align='C')
                 pdf.cell(75, 7, desc, border=1, align='L')
                 pdf.cell(30, 7, debit_str, border=1, align='R')
@@ -614,41 +551,133 @@ elif selected_menu == "📁 Data Lengkap":
                 pdf.ln()
 
             pdf.ln(5)
-            
-            # --- SUMMARY KOTAK ---
             pdf.set_font("Arial", 'B', 9)
-            pdf.cell(40, 6, "Total Pengeluaran", border=0)
+            pdf.cell(40, 6, "Total Debit", border=0)
             pdf.cell(50, 6, f"IDR {total_debit:,.2f}", border=0, ln=True)
-            pdf.cell(40, 6, "Total Pemasukan", border=0)
+            pdf.cell(40, 6, "Total Kredit", border=0)
             pdf.cell(50, 6, f"IDR {total_kredit:,.2f}", border=0, ln=True)
             pdf.cell(40, 6, "Net Saldo Bulan Ini", border=0)
             pdf.cell(50, 6, f"IDR {running_balance:,.2f}", border=0, ln=True)
             
             pdf.ln(10)
-            
-            # --- FOOTER ---
             pdf.set_font("Arial", 'I', 8)
             pdf.set_text_color(150, 150, 150)
             pdf.cell(0, 5, "IMPORTANT!", ln=True)
             pdf.cell(0, 5, "Dokumen e-statement ini di-generate secara otomatis oleh sistem aplikasi Bento Pro.", ln=True)
             pdf.cell(0, 5, "Data keuangan Anda bersifat rahasia. Jangan membagikannya dengan alasan apa pun.", ln=True)
             
-            # Output ke bytes
             return pdf.output(dest='S').encode('latin-1')
 
-        # Generate Button
         pdf_bytes = create_pdf(df_filtered_view, selected_month, selected_year)
-        
         st.download_button(
-            label="📄 Download E-Statement (.pdf)",
-            data=pdf_bytes,
+            label="📄 Download E-Statement (.pdf)", data=pdf_bytes,
             file_name=f"E-Statement_BentoPro_{selected_month}_{selected_year}.pdf",
-            mime="application/pdf",
-            use_container_width=True
+            mime="application/pdf", use_container_width=True
         )
         st.divider()
 
-    # --- TABEL UTANG ---
+    # --- TIGA TAB UTAMA ---
+    tab_tabel, tab_cari, tab_utang = st.tabs(["📋 Tabel (Edit & Hapus)", "🔍 Cari & Filter (Baru!)", "💸 Kelola Utang"])
+
+    # --- TAB 1: TABEL TRANSAKSI (EDIT & HAPUS) ---
+    with tab_tabel:
+        st.info("💡 **Cara Edit:** Klik sel untuk mengubah teks. **Cara Hapus:** Centang kotak paling kiri, lalu klik ikon 🗑️ di atas tabel. Jangan lupa klik Simpan.")
+        if not df_filtered_view.empty:
+            cols_to_show = ["Tanggal", "Item", "Kategori", "Nominal", "Tipe", "Status", "Keterangan", "Metode Pembayaran"]
+            df_to_edit = df_filtered_view[cols_to_show].copy()
+            semua_kategori = list(dict.fromkeys(KATEGORI_PEMASUKAN + KATEGORI_PENGELUARAN))
+            
+            edited_df = st.data_editor(
+                df_to_edit,
+                column_config={
+                    "Tanggal": st.column_config.DateColumn("Tanggal", format="DD MMM YYYY", required=True),
+                    "Nominal": st.column_config.NumberColumn("Nominal", format="Rp %d", required=True),
+                    "Tipe": st.column_config.SelectboxColumn("Tipe", options=["Pemasukan", "Pengeluaran"], required=True),
+                    "Kategori": st.column_config.SelectboxColumn("Kategori", options=semua_kategori, required=True),
+                    "Status": st.column_config.SelectboxColumn("Status", options=["Lunas", "Belum Lunas"], required=True),
+                    "Metode Pembayaran": st.column_config.SelectboxColumn("Metode", options=["-"] + METODE_PEMBAYARAN, required=True)
+                },
+                num_rows="dynamic", hide_index=False, use_container_width=True, key="editor_transaksi_lengkap"
+            )
+            
+            if st.button("💾 Simpan Perubahan Data", type="primary"):
+                try:
+                    orig = conn.read(worksheet="Transaksi", ttl=0)
+                    orig['Tanggal_Parsed'] = pd.to_datetime(orig['Tanggal'], errors='coerce')
+                    mask_orig = (orig['Tanggal_Parsed'].dt.month_name() == selected_month) & (orig['Tanggal_Parsed'].dt.year == selected_year)
+                    orig_kept = orig[~mask_orig].copy().drop(columns=['Tanggal_Parsed'])
+                    
+                    edited_clean = edited_df.copy()
+                    edited_clean['Tanggal'] = pd.to_datetime(edited_clean['Tanggal']).dt.strftime('%Y-%m-%d')
+                    
+                    final_df = pd.concat([orig_kept, edited_clean], ignore_index=True)
+                    conn.update(worksheet="Transaksi", data=final_df)
+                    st.toast("✅ Perubahan tabel berhasil disimpan!", icon="🍱")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal menyimpan: {e}")
+        else:
+            st.info("Data kosong.")
+
+    # --- TAB 2: CARI & FILTER (FITUR BARU) ---
+    with tab_cari:
+        st.markdown("### 🔍 Rekap & Pencarian Spesifik")
+        
+        # Opsi untuk mencari di bulan ini saja atau seluruh data dari awal
+        search_global = st.toggle("🌍 Cari di seluruh riwayat data (semua bulan)", value=False)
+        df_source = df.copy() if search_global else df_filtered_view.copy()
+        
+        if not df_source.empty:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                cari_teks = st.text_input("Kata Kunci (Item / Ket)", placeholder="Cth: futsal, makan...")
+            with c2:
+                cari_tipe = st.multiselect("Filter Tipe", ["Pengeluaran", "Pemasukan"])
+            with c3:
+                semua_kat = list(dict.fromkeys(KATEGORI_PEMASUKAN + KATEGORI_PENGELUARAN))
+                cari_kat = st.multiselect("Filter Kategori", semua_kat)
+                
+            # Proses Filter Data
+            df_result = df_source.copy()
+            if cari_teks:
+                mask_teks = df_result['Item'].str.contains(cari_teks, case=False, na=False) | \
+                            df_result['Keterangan'].str.contains(cari_teks, case=False, na=False)
+                df_result = df_result[mask_teks]
+            if cari_tipe:
+                df_result = df_result[df_result['Tipe'].isin(cari_tipe)]
+            if cari_kat:
+                df_result = df_result[df_result['Kategori'].isin(cari_kat)]
+                
+            st.divider()
+            
+            # Hitung Total Otomatis
+            tot_in = df_result[df_result['Tipe'] == 'Pemasukan']['Nominal'].sum()
+            tot_out = df_result[df_result['Tipe'] == 'Pengeluaran']['Nominal'].sum()
+            jum_trans = len(df_result)
+            
+            # Tampilkan Total
+            cc1, cc2, cc3 = st.columns(3)
+            cc1.metric("🟢 Total Pemasukan", f"Rp {tot_in:,.0f}")
+            cc2.metric("🔴 Total Pengeluaran", f"Rp {tot_out:,.0f}")
+            cc3.metric("📝 Jumlah Transaksi", f"{jum_trans} Transaksi")
+            
+            st.write("")
+            
+            # Tampilkan Tabel Hasil Filter
+            cols_show = ["Tanggal", "Item", "Kategori", "Nominal", "Tipe", "Metode Pembayaran", "Keterangan"]
+            st.dataframe(
+                df_result[cols_show].sort_values('Tanggal', ascending=False),
+                column_config={
+                    "Tanggal": st.column_config.DateColumn("Tanggal", format="DD MMM YYYY"),
+                    "Nominal": st.column_config.NumberColumn("Nominal", format="Rp %d")
+                },
+                hide_index=True, use_container_width=True
+            )
+        else:
+            st.info("Belum ada data transaksi yang bisa dicari.")
+
+    # --- TAB 3: TABEL UTANG ---
     with tab_utang:
         st.info("💡 Ubah Status ke **'Lunas'** DAN pilih **Metode Pembayaran** (sumber dana). Lalu klik Update.")
         df_unpaid = df[df['Status'] == 'Belum Lunas'].copy()
