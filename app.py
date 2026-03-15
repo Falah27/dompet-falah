@@ -57,6 +57,11 @@ def init_session_state():
         st.session_state.reset_key = 0
     if 'filter_mode' not in st.session_state:
         st.session_state.filter_mode = 'monthly'  # 'monthly' or 'custom'
+    # Initialize monitor dates
+    if 'monitor_start_date' not in st.session_state:
+        st.session_state.monitor_start_date = datetime(datetime.now().year, datetime.now().month, 1).date()
+    if 'monitor_end_date' not in st.session_state:
+        st.session_state.monitor_end_date = datetime.now().date()
 
 # 1. KONFIGURASI HALAMAN
 st.set_page_config(page_title="Budget Bento Pro v15 Professional", page_icon="🍱", layout="wide")
@@ -508,7 +513,7 @@ with st.sidebar:
     
     # Check if there's a navigation request
     default_index = 0
-    menu_options = ["🏠 Dashboard", "👛 Dompet Saya", "💰 Budget Planner", "🔄 Transaksi Rutin", "🎯 Target Impian", "📁 Data Lengkap"]
+    menu_options = ["🏠 Dashboard", "👛 Dompet Saya", "💵 Monitor Gaji", "💰 Budget Planner", "🔄 Transaksi Rutin", "🎯 Target Impian", "📁 Data Lengkap"]
     
     if 'goto_menu' in st.session_state:
         target_menu = st.session_state['goto_menu']
@@ -636,7 +641,44 @@ if selected_menu == "🏠 Dashboard":
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
+            # 🚀 SMART: Gunakan tracking data jika aktif
+            if hasattr(st.session_state, 'monitor_active') and st.session_state.monitor_active:
+                # Hitung sisa dari tracking
+                monitor_start_tracking = datetime.combine(st.session_state.monitor_period_start, datetime.min.time())
+                monitor_end_tracking = datetime.combine(st.session_state.monitor_period_end, datetime.max.time())
+                
+                df_expense_tracking = df[
+                    (df['Tanggal'] >= monitor_start_tracking) & 
+                    (df['Tanggal'] <= monitor_end_tracking) & 
+                    (df['Tipe'] == 'Pengeluaran')
+                ]
+                
+                total_expense_tracking = df_expense_tracking['Nominal'].sum() if not df_expense_tracking.empty else 0
+                sisa_tracking = st.session_state.monitor_total - total_expense_tracking
+                persentase_tracking = (total_expense_tracking / st.session_state.monitor_total * 100) if st.session_state.monitor_total > 0 else 0
+                
+                badge_color = "#10B981" if sisa_tracking >= 0 else "#EF4444"
+                status_emoji = "✅" if persentase_tracking < 80 else "⚠️" if persentase_tracking < 100 else "🔴"
+                
+                st.markdown(f"""
+                <div class="bento-card-blue">
+                    <div>
+                        <div class="card-label">💰 Sisa Saldo (Tracking) {status_emoji}</div>
+                        <div class="card-value">Rp {sisa_tracking:,.0f}</div>
+                    </div>
+                    <div class="card-detail">
+                        Dari {st.session_state.monitor_count} pemasukan terpilih • {100 - persentase_tracking:.1f}% tersisa
+                        <div style="margin-top:8px;">
+                            <div style="background: rgba(255,255,255,0.2); height:6px; border-radius:3px; overflow:hidden;">
+                                <div style="background: {badge_color}; height:100%; width:{min(persentase_tracking, 100):.1f}%; transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Default: tampilkan saldo real global
+                st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
         with c2:
             st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan (Periode)</div><div class="card-value">+ Rp {period_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
 
@@ -652,6 +694,25 @@ if selected_menu == "🏠 Dashboard":
                     st.info("Belum ada pengeluaran.")
         with c4:
             st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">⚠️ Total Tanggungan</div><div class="card-value">! Rp {total_utang:,.0f}</div></div><div class="card-detail">{len(df_utang)} Transaksi Belum Lunas</div></div>""", unsafe_allow_html=True)
+        
+        # Info tracking aktif (jika ada)
+        if hasattr(st.session_state, 'monitor_active') and st.session_state.monitor_active:
+            st.info(f"""
+            📊 **Tracking Aktif:** {st.session_state.monitor_items}  
+            📅 **Periode:** {st.session_state.monitor_period_start.strftime('%d/%m/%Y')} - {st.session_state.monitor_period_end.strftime('%d/%m/%Y')}  
+            💡 Card "Sisa Saldo" menampilkan sisa dari {st.session_state.monitor_count} pemasukan yang Anda pilih
+            """)
+            
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                if st.button("⚙️ Kelola di Monitor Gaji", key="goto_monitor_info", use_container_width=True):
+                    st.session_state['goto_menu'] = '💵 Monitor Gaji'
+                    st.rerun()
+            with col_info2:
+                if st.button("🗑️ Nonaktifkan Tracking", key="reset_tracking_info", use_container_width=True, type="secondary"):
+                    st.session_state.monitor_active = False
+                    st.session_state.selected_incomes = []
+                    st.rerun()
     else:
         st.info("Belum ada data transaksi.")
         df_filtered = pd.DataFrame()
@@ -682,7 +743,7 @@ if selected_menu == "🏠 Dashboard":
             input_deskripsi = st.text_input("Item", placeholder="Cth: Kopi / Gaji", key=f"in_desk_{st.session_state.reset_key}")
             input_ket = st.text_area("Ket", height=100, key=f"in_ket_{st.session_state.reset_key}")
             
-        if st.button("💾 SIMPAN DATA", type="primary", width="stretch"):
+        if st.button("💾 SIMPAN DATA", type="primary", use_container_width=True):
             if not input_deskripsi or input_nominal is None or input_nominal <= 0:
                 st.error("⚠️ Gagal: Nama Item harus diisi dan Nominal harus lebih dari 0!")
             else:
@@ -862,7 +923,301 @@ elif selected_menu == "👛 Dompet Saya":
                     st.error(f"❌ Gagal update: {e}")
                     st.info("💡 **Tips jika gagal:**\n- Pastikan koneksi internet stabil\n- Refresh halaman dan coba lagi\n- Cek apakah Google Sheets masih dapat diakses")
 
-# ---------------- SCREEN 3: BUDGET PLANNER ----------------
+# ---------------- SCREEN 3: MONITOR GAJI ----------------
+elif selected_menu == "💵 Monitor Gaji":
+    st.title("💵 Monitor Gaji & Pengeluaran")
+    st.markdown("💡 **Monitor pengeluaran berdasarkan gaji/pemasukan tertentu dalam periode yang Anda pilih**")
+    
+    st.divider()
+    
+    # Section: Pilih Periode & Pemasukan Acuan
+    st.subheader("1️⃣ Pengaturan Periode & Acuan Dompet")
+    
+    with st.container(border=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📅 Pilih Periode Monitoring**")
+            monitor_start = st.date_input(
+                "Dari Tanggal",
+                value=st.session_state.monitor_start_date,
+                key="monitor_start_input"
+            )
+            monitor_end = st.date_input(
+                "Sampai Tanggal",
+                value=st.session_state.monitor_end_date,
+                key="monitor_end_input"
+            )
+            
+            # Update session state saat tanggal berubah
+            if monitor_start != st.session_state.monitor_start_date:
+                st.session_state.monitor_start_date = monitor_start
+            if monitor_end != st.session_state.monitor_end_date:
+                st.session_state.monitor_end_date = monitor_end
+        
+        # Convert dates outside column scope untuk dipakai di section lain
+        monitor_start_dt = datetime.combine(monitor_start, datetime.min.time())
+        monitor_end_dt = datetime.combine(monitor_end, datetime.max.time())
+        
+        with col2:
+            st.markdown("**💰 Pilih Pemasukan sebagai Acuan (bisa lebih dari 1)**")
+            st.caption("✅ Centang pemasukan yang ingin dijadikan acuan dompet")
+            
+            # Initialize session state untuk checkbox
+            if 'selected_incomes' not in st.session_state:
+                st.session_state.selected_incomes = []
+            
+            if not df.empty:
+                df_income_period = df[
+                    (df['Tanggal'] >= monitor_start_dt) & 
+                    (df['Tanggal'] <= monitor_end_dt) & 
+                    (df['Tipe'] == 'Pemasukan')
+                ]
+                
+                if not df_income_period.empty:
+                    # Container untuk checkbox dengan scrollable area
+                    with st.container(height=200):
+                        selected_income_list = []
+                        
+                        for idx, row in df_income_period.iterrows():
+                            checkbox_label = f"{row['Tanggal'].strftime('%d/%m/%Y')} - {row['Item']} - Rp {row['Nominal']:,.0f}"
+                            checkbox_key = f"income_{idx}_{row['Tanggal'].strftime('%Y%m%d')}_{row['Item']}"
+                            
+                            is_checked = st.checkbox(
+                                checkbox_label,
+                                key=checkbox_key,
+                                value=checkbox_key in st.session_state.selected_incomes
+                            )
+                            
+                            if is_checked:
+                                if checkbox_key not in st.session_state.selected_incomes:
+                                    st.session_state.selected_incomes.append(checkbox_key)
+                                selected_income_list.append({
+                                    'nominal': row['Nominal'],
+                                    'item': row['Item'],
+                                    'tanggal': row['Tanggal']
+                                })
+                            else:
+                                if checkbox_key in st.session_state.selected_incomes:
+                                    st.session_state.selected_incomes.remove(checkbox_key)
+                    
+                    # Hitung total dari pemasukan yang dipilih
+                    if selected_income_list:
+                        gaji_nominal = sum([inc['nominal'] for inc in selected_income_list])
+                        if len(selected_income_list) == 1:
+                            gaji_item = selected_income_list[0]['item']
+                        else:
+                            gaji_item = f"{len(selected_income_list)} Pemasukan Dipilih"
+                        
+                        # Simpan info ke session state untuk dashboard
+                        st.session_state.monitor_active = True
+                        st.session_state.monitor_total = gaji_nominal
+                        st.session_state.monitor_items = ", ".join([inc['item'] for inc in selected_income_list])
+                        st.session_state.monitor_count = len(selected_income_list)
+                        st.session_state.monitor_period_start = monitor_start
+                        st.session_state.monitor_period_end = monitor_end
+                    else:
+                        st.info("✨ Centang minimal 1 pemasukan untuk mulai tracking")
+                        gaji_nominal = 0
+                        gaji_item = ""
+                        st.session_state.monitor_active = False
+                    
+                else:
+                    st.warning("⚠️ Tidak ada pemasukan di periode ini")
+                    gaji_nominal = 0
+                    gaji_item = ""
+                    st.session_state.monitor_active = False
+            else:
+                st.warning("⚠️ Tidak ada data transaksi")
+                gaji_nominal = 0
+                gaji_item = ""
+                st.session_state.monitor_active = False
+    
+    st.divider()
+    
+    # Section: Analisis Pengeluaran vs Gaji
+    if gaji_nominal > 0:
+        st.subheader("2️⃣ Analisis Pengeluaran vs Acuan Dompet")
+        
+        # Hitung pengeluaran dalam periode
+        df_expense_period = df[
+            (df['Tanggal'] >= monitor_start_dt) & 
+            (df['Tanggal'] <= monitor_end_dt) & 
+            (df['Tipe'] == 'Pengeluaran')
+        ]
+        
+        total_expense = df_expense_period['Nominal'].sum() if not df_expense_period.empty else 0
+        sisa_gaji = gaji_nominal - total_expense
+        persentase_terpakai = (total_expense / gaji_nominal * 100) if gaji_nominal > 0 else 0
+        
+        # Update session state dengan data expense
+        st.session_state.monitor_expense = total_expense
+        st.session_state.monitor_remaining = sisa_gaji
+        st.session_state.monitor_percentage = persentase_terpakai
+        
+        # Cards Summary
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="bento-card-blue" style="height:140px;">
+                <div class="card-label">💰 Acuan Dompet</div>
+                <div class="card-value">Rp {gaji_nominal:,.0f}</div>
+                <div class="card-detail">{gaji_item}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="bento-card-red" style="height:140px;">
+                <div class="card-label">📉 Total Pengeluaran</div>
+                <div class="card-value">Rp {total_expense:,.0f}</div>
+                <div class="card-detail">{persentase_terpakai:.1f}% terpakai</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            sisa_color = "green" if sisa_gaji >= 0 else "red"
+            st.markdown(f"""
+            <div class="bento-card-{sisa_color}" style="height:140px;">
+                <div class="card-label">💸 Sisa Dompet</div>
+                <div class="card-value">Rp {sisa_gaji:,.0f}</div>
+                <div class="card-detail">{100 - persentase_terpakai:.1f}% tersisa</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            # Hitung saving sebelum periode (saldo sebelum periode monitoring dimulai)
+            df_before_period = df[df['Tanggal'] < monitor_start_dt]
+            
+            if not df_before_period.empty:
+                income_before = df_before_period[df_before_period['Tipe'] == 'Pemasukan']['Nominal'].sum()
+                expense_before = df_before_period[df_before_period['Tipe'] == 'Pengeluaran']['Nominal'].sum()
+                saving_before = income_before - expense_before
+            else:
+                saving_before = 0
+            
+            st.markdown(f"""
+            <div class="bento-card-warning" style="height:140px;">
+                <div class="card-label">🏦 Saving Sebelumnya</div>
+                <div class="card-value">Rp {saving_before:,.0f}</div>
+                <div class="card-detail">Periode sebelum {monitor_start.strftime('%d/%m/%Y')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Section: Breakdown Pengeluaran
+        st.subheader("3️⃣ Breakdown Pengeluaran dalam Periode")
+        
+        if not df_expense_period.empty:
+            col_chart1, col_chart2 = st.columns([3, 2])
+            
+            with col_chart1:
+                # Bar chart per kategori
+                expense_by_category = df_expense_period.groupby('Kategori')['Nominal'].sum().reset_index()
+                expense_by_category = expense_by_category.sort_values('Nominal', ascending=False)
+                
+                fig_bar = px.bar(
+                    expense_by_category,
+                    x='Kategori',
+                    y='Nominal',
+                    title='Pengeluaran per Kategori',
+                    color='Nominal',
+                    color_continuous_scale='Reds'
+                )
+                fig_bar.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    height=350,
+                    showlegend=False
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            with col_chart2:
+                # Pie chart proporsi
+                fig_pie = px.pie(
+                    expense_by_category,
+                    values='Nominal',
+                    names='Kategori',
+                    hole=0.5,
+                    title='Proporsi Pengeluaran'
+                )
+                fig_pie.update_layout(
+                    height=350,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="v",
+                        yanchor="middle",
+                        y=0.5,
+                        xanchor="left",
+                        x=1.05
+                    )
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Tabel Detail
+            st.markdown("**📋 Detail Transaksi Pengeluaran**")
+            
+            # Prepare display dataframe
+            df_display = df_expense_period[['Tanggal', 'Item', 'Kategori', 'Nominal', 'Metode Pembayaran']].copy()
+            df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%d/%m/%Y')
+            df_display['Nominal'] = df_display['Nominal'].apply(lambda x: f"Rp {x:,.0f}")
+            
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                height=300
+            )
+            
+        else:
+            st.info("✨ Tidak ada pengeluaran dalam periode ini!")
+        
+        st.divider()
+        
+        # Section: Ringkasan Total
+        st.subheader("4️⃣ Ringkasan Total Keuangan")
+        
+        total_aset_sekarang = saving_before + sisa_gaji
+        
+        col_summary = st.columns([1, 1, 1])
+        
+        with col_summary[0]:
+            st.metric(
+                label="Saving Sebelum Periode",
+                value=f"Rp {saving_before:,.0f}",
+                help="Saldo akumulasi sebelum periode monitoring dimulai"
+            )
+        
+        with col_summary[1]:
+            st.metric(
+                label="Sisa Gaji Periode Ini",
+                value=f"Rp {sisa_gaji:,.0f}",
+                delta=f"{100 - persentase_terpakai:.1f}% tersisa",
+                delta_color="normal" if sisa_gaji >= 0 else "inverse"
+            )
+        
+        with col_summary[2]:
+            st.metric(
+                label="Total Aset Sekarang",
+                value=f"Rp {total_aset_sekarang:,.0f}",
+                help="Saving + Sisa Gaji Periode Ini"
+            )
+        
+        # Info Box
+        st.info(f"""
+        **📊 Interpretasi:**
+        - **Saving Sebelumnya (Rp {saving_before:,.0f})** adalah akumulasi sisa uang dari semua transaksi sebelum {monitor_start.strftime('%d %b %Y')}
+        - **Acuan Dompet (Rp {gaji_nominal:,.0f})** adalah pemasukan ({gaji_item}) yang Anda gunakan sebagai patokan pengeluaran periode ini
+        - **Total Pengeluaran (Rp {total_expense:,.0f})** adalah semua pengeluaran dari {monitor_start.strftime('%d %b %Y')} sampai {monitor_end.strftime('%d %b %Y')}
+        - **Sisa Dompet (Rp {sisa_gaji:,.0f})** adalah sisa dari acuan dompet setelah dikurangi pengeluaran periode ini
+        - **Total Aset (Rp {total_aset_sekarang:,.0f})** adalah total kekayaan Anda saat ini (Saving + Sisa Gaji)
+        """)
+    else:
+        st.warning("⚠️ Pilih periode dan pemasukan terlebih dahulu untuk melihat analisis")
+
+# ---------------- SCREEN 4: BUDGET PLANNER ----------------
 elif selected_menu == "💰 Budget Planner":
     st.title("💰 Perencanaan Budget")
     
@@ -873,7 +1228,7 @@ elif selected_menu == "💰 Budget Planner":
         with col_simpan:
             st.write("")
             st.write("")
-            if st.button("📥 Catat Pemasukan", width="stretch"):
+            if st.button("📥 Catat Pemasukan", use_container_width=True):
                 success, message = add_transaction_optimized({
                     "Tanggal": datetime.today().strftime("%Y-%m-%d"),
                     "Item": "Gaji Bulanan",
@@ -969,7 +1324,7 @@ elif selected_menu == "💰 Budget Planner":
     else:
         st.info("Atur budget terlebih dahulu untuk melihat perbandingan.")
 
-# ---------------- SCREEN 4: TRANSAKSI RUTIN (RECURRING) ----------------
+# ---------------- SCREEN 5: TRANSAKSI RUTIN (RECURRING) ----------------
 elif selected_menu == "🔄 Transaksi Rutin":
     st.title("🔄 Transaksi Rutin (Recurring)")
     st.markdown("Kelola transaksi yang berulang setiap bulan seperti langganan, tagihan, atau gaji tetap.")
@@ -1090,7 +1445,7 @@ elif selected_menu == "🔄 Transaksi Rutin":
                 except Exception as e:
                     st.error(f"❌ Gagal menyimpan: {e}")
 
-# ---------------- SCREEN 5: TARGET IMPIAN ----------------
+# ---------------- SCREEN 6: TARGET IMPIAN ----------------
 elif selected_menu == "🎯 Target Impian":
     st.title("🎯 Target & Wishlist")
     st.markdown("Pantau progress tabunganmu untuk mencapai impian besar (Gadget, Liburan, Kendaraan, dll).")
@@ -1155,7 +1510,7 @@ elif selected_menu == "🎯 Target Impian":
                     st.error(f"❌ Gagal menyimpan target: {e}")
                     st.info("💡 Refresh halaman dan coba lagi jika koneksi bermasalah.")
 
-# ---------------- SCREEN 6: DATA LENGKAP & EXPORT ----------------
+# ---------------- SCREEN 7: DATA LENGKAP & EXPORT ----------------
 elif selected_menu == "📁 Data Lengkap":
     st.title("📁 Data Lengkap & Laporan")
     
@@ -1267,7 +1622,7 @@ elif selected_menu == "📁 Data Lengkap":
         st.download_button(
             label="📄 Download E-Statement (.pdf)", data=pdf_bytes,
             file_name=f"E-Statement_BentoPro_{selected_month}_{selected_year}.pdf",
-            mime="application/pdf", width="stretch"
+            mime="application/pdf", use_container_width=True
         )
         st.divider()
 
