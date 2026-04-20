@@ -68,7 +68,12 @@ st.set_page_config(page_title="Budget Bento Pro v15 Professional", page_icon="�
 
 # --- KONFIGURASI KATEGORI ---
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Pembayaran", "Penjualan", "Lainnya"]
-KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Lainnya"]
+KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Amal", "Lainnya"]
+KATEGORI_TRANSFER = "Transfer Internal"
+if KATEGORI_TRANSFER not in KATEGORI_PEMASUKAN:
+    KATEGORI_PEMASUKAN.append(KATEGORI_TRANSFER)
+if KATEGORI_TRANSFER not in KATEGORI_PENGELUARAN:
+    KATEGORI_PENGELUARAN.append(KATEGORI_TRANSFER)
 METODE_PEMBAYARAN = ["Cash", "Livin (Mandiri)", "Octo (CIMB)", "DANA", "Shopeepay", "Kartu Kredit"]
 # START_DATE_MONITORING sudah tidak dipakai lagi, diganti dengan Tanggal Reset per Wallet
 
@@ -285,6 +290,59 @@ def update_transactions_batch(updated_df, month_filter, year_filter):
     except Exception as e:
         return False, f"Error: {e}"
 
+def add_internal_transfer_optimized(transfer_date, nominal, source_wallet, target_wallet, note=""):
+    """Catat top up antar wallet sebagai 2 transaksi agar saldo sumber/tujuan otomatis terhitung."""
+    try:
+        if nominal <= 0:
+            return False, "Nominal transfer harus lebih dari 0."
+        if source_wallet == target_wallet:
+            return False, "Wallet sumber dan tujuan harus berbeda."
+
+        df = st.session_state.data_cache['transaksi'].copy()
+        base_note = note.strip() if note else "Transfer antar dompet"
+
+        transfer_rows = pd.DataFrame([
+            {
+                "Tanggal": pd.to_datetime(transfer_date).strftime("%Y-%m-%d"),
+                "Item": f"Top Up ke {target_wallet}",
+                "Kategori": KATEGORI_TRANSFER,
+                "Nominal": nominal,
+                "Tipe": "Pengeluaran",
+                "Status": "Lunas",
+                "Keterangan": f"{base_note} | Dari {source_wallet} ke {target_wallet}",
+                "Metode Pembayaran": source_wallet
+            },
+            {
+                "Tanggal": pd.to_datetime(transfer_date).strftime("%Y-%m-%d"),
+                "Item": f"Top Up dari {source_wallet}",
+                "Kategori": KATEGORI_TRANSFER,
+                "Nominal": nominal,
+                "Tipe": "Pemasukan",
+                "Status": "Lunas",
+                "Keterangan": f"{base_note} | Dari {source_wallet} ke {target_wallet}",
+                "Metode Pembayaran": target_wallet
+            }
+        ])
+
+        transfer_rows['Tanggal'] = pd.to_datetime(transfer_rows['Tanggal'])
+        transfer_rows['Nominal'] = pd.to_numeric(transfer_rows['Nominal'], errors='coerce').fillna(0)
+        transfer_rows['Month'] = transfer_rows['Tanggal'].dt.month_name()
+        transfer_rows['Year'] = transfer_rows['Tanggal'].dt.year
+
+        final_df = pd.concat([df, transfer_rows], ignore_index=True)
+        st.session_state.data_cache['transaksi'] = final_df
+
+        df_to_save = final_df.drop(columns=['Month', 'Year'], errors='ignore').copy()
+        df_to_save['Tanggal'] = pd.to_datetime(df_to_save['Tanggal']).dt.strftime('%Y-%m-%d')
+
+        def update_operation():
+            return conn.update(worksheet="Transaksi", data=df_to_save)
+
+        retry_gsheet_operation(update_operation, max_retries=3, delay=1)
+        return True, f"Top up Rp {nominal:,.0f} dari {source_wallet} ke {target_wallet} berhasil!"
+    except Exception as e:
+        return False, f"Error: {e}"
+
 # ============================================================
 # 🚀 OPTIMASI #4: EFFICIENT FILTERING WITH INDEXING
 # ============================================================
@@ -302,6 +360,26 @@ def filter_data_efficient(df, month, year):
     # 🚀 OPTIMASI: Gunakan boolean indexing langsung, sudah pre-computed
     mask = (df['Month'] == month) & (df['Year'] == year)
     return df.loc[mask].copy()
+
+def sort_by_latest_record(df):
+    """Urutkan transaksi berdasarkan nomor pencatatan terbaru (record terbaru di atas)."""
+    if df.empty:
+        return df
+
+    result = df.copy()
+
+    # Prioritaskan kolom ID jika tersedia dan numerik.
+    if 'ID' in result.columns:
+        id_numeric = pd.to_numeric(result['ID'], errors='coerce')
+        if id_numeric.notna().any():
+            result['_sort_record_id'] = id_numeric
+            result = result.sort_values('_sort_record_id', ascending=False, kind='stable')
+            return result.drop(columns=['_sort_record_id'])
+
+    # Fallback ke urutan baris asli (baris terakhir dianggap pencatatan terbaru).
+    result['_sort_record_idx'] = result.index
+    result = result.sort_values('_sort_record_idx', ascending=False, kind='stable')
+    return result.drop(columns=['_sort_record_idx'])
 
 def search_transactions_optimized(df, keyword="", tipe_filter=None, kategori_filter=None):
     """Search dengan optimasi untuk performa lebih baik"""
@@ -634,6 +712,7 @@ if selected_menu == "🏠 Dashboard":
         current_balance = global_in - global_out 
 
         period_in = df_filtered[df_filtered['Tipe'] == 'Pemasukan']['Nominal'].sum()
+        period_gaji = df_filtered[(df_filtered['Tipe'] == 'Pemasukan') & (df_filtered['Kategori'] == 'Gaji')]['Nominal'].sum()
         period_out = df_filtered[df_filtered['Tipe'] == 'Pengeluaran']['Nominal'].sum()
         
         df_utang = df[df['Status'] == 'Belum Lunas']
@@ -641,6 +720,20 @@ if selected_menu == "🏠 Dashboard":
 
         c1, c2 = st.columns(2)
         with c1:
+            st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan (Periode)</div><div class="card-value">+ Rp {period_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
+
+        with c2:
+            st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">📉 Pengeluaran (Periode)</div><div class="card-value">- Rp {period_out:,.0f}</div></div></div>""", unsafe_allow_html=True)
+            with st.popover("Lihat Rincian Dompet 💳", use_container_width=True):
+                if period_out > 0:
+                    df_methods = df_filtered[df_filtered['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
+                    for _, row in df_methods.iterrows():
+                        st.markdown(f"<div style='display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #333;'><span>{row['Metode Pembayaran']}</span><b>Rp {row['Nominal']:,.0f}</b></div>", unsafe_allow_html=True)
+                else:
+                    st.info("Belum ada pengeluaran.")
+
+        c3, c4 = st.columns(2)
+        with c3:
             # 🚀 SMART: Gunakan tracking data jika aktif
             if hasattr(st.session_state, 'monitor_active') and st.session_state.monitor_active:
                 # Hitung sisa dari tracking
@@ -679,21 +772,12 @@ if selected_menu == "🏠 Dashboard":
             else:
                 # Default: tampilkan saldo real global
                 st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan (Periode)</div><div class="card-value">+ Rp {period_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
 
-        c3, c4 = st.columns(2)
-        with c3:
-            st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">📉 Pengeluaran (Periode)</div><div class="card-value">- Rp {period_out:,.0f}</div></div></div>""", unsafe_allow_html=True)
-            with st.popover("Lihat Rincian Dompet 💳", use_container_width=True):
-                if period_out > 0:
-                    df_methods = df_filtered[df_filtered['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
-                    for _, row in df_methods.iterrows():
-                        st.markdown(f"<div style='display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #333;'><span>{row['Metode Pembayaran']}</span><b>Rp {row['Nominal']:,.0f}</b></div>", unsafe_allow_html=True)
-                else:
-                    st.info("Belum ada pengeluaran.")
         with c4:
-            st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">⚠️ Total Tanggungan</div><div class="card-value">! Rp {total_utang:,.0f}</div></div><div class="card-detail">{len(df_utang)} Transaksi Belum Lunas</div></div>""", unsafe_allow_html=True)
+            net_flow = period_gaji - period_out
+            net_flow_str = f"+ Rp {net_flow:,.0f}" if net_flow >= 0 else f"- Rp {abs(net_flow):,.0f}"
+            net_flow_class = "bento-card-green" if net_flow >= 0 else "bento-card-red"
+            st.markdown(f"""<div class="{net_flow_class}"><div><div class="card-label">⚖️ Gaji - Pengeluaran</div><div class="card-value">{net_flow_str}</div></div><div class="card-detail">Periode Terpilih</div></div>""", unsafe_allow_html=True)
         
         # Info tracking aktif (jika ada)
         if hasattr(st.session_state, 'monitor_active') and st.session_state.monitor_active:
@@ -767,6 +851,80 @@ if selected_menu == "🏠 Dashboard":
                     st.rerun()
                 else:
                     st.error(message)
+
+    # TOP UP ANTAR DOMPET / E-WALLET (dipindah ke Dashboard)
+    with st.expander("🔄 Top Up Antar Dompet / E-Wallet", expanded=False):
+        st.caption("Contoh: dari Octo ke DANA/Shopeepay. Sistem akan otomatis buat 2 transaksi (keluar & masuk).")
+
+        if df_wallet_initial.empty:
+            st.warning("Data dompet belum tersedia. Tambahkan wallet terlebih dahulu di menu Dompet Saya.")
+        else:
+            live_wallets_dashboard = df_wallet_initial.copy()
+            live_wallets_dashboard['Saldo Sekarang'] = 0.0
+
+            for idx, wallet_row in live_wallets_dashboard.iterrows():
+                wallet_name = wallet_row['Wallet']
+                reset_date = wallet_row['Tanggal Reset']
+
+                df_wallet_trans = df[(df['Tanggal'] >= reset_date) & (df['Metode Pembayaran'] == wallet_name)]
+                total_in = df_wallet_trans[df_wallet_trans['Tipe'] == 'Pemasukan']['Nominal'].sum()
+                total_out = df_wallet_trans[df_wallet_trans['Tipe'] == 'Pengeluaran']['Nominal'].sum()
+                live_wallets_dashboard.at[idx, 'Saldo Sekarang'] = wallet_row['Saldo Awal'] + total_in - total_out
+
+            wallet_options = live_wallets_dashboard['Wallet'].dropna().astype(str).tolist()
+            wallet_balance_map = {row['Wallet']: row['Saldo Sekarang'] for _, row in live_wallets_dashboard.iterrows()}
+
+            if len(wallet_options) < 1:
+                st.warning("Tambahkan minimal 1 wallet di menu Dompet Saya untuk menggunakan fitur top up.")
+            else:
+                c_top1, c_top2, c_top3 = st.columns(3)
+                with c_top1:
+                    transfer_date = st.date_input("Tanggal Top Up", datetime.today(), key="topup_date")
+                    source_wallet = st.selectbox("Dari Wallet", wallet_options, key="topup_source")
+                with c_top2:
+                    target_candidates = [w for w in wallet_options if w != source_wallet]
+                    # Tambahkan opsi Cash sebagai tujuan tarik tunai dari wallet digital/mobile banking.
+                    if source_wallet != "Cash" and "Cash" not in target_candidates:
+                        target_candidates.append("Cash")
+
+                    if not target_candidates:
+                        st.warning("Belum ada wallet tujuan yang berbeda dari wallet sumber.")
+                        target_wallet = source_wallet
+                    else:
+                        target_wallet = st.selectbox("Ke Wallet", target_candidates, key="topup_target")
+
+                    transfer_nominal = st.number_input("Nominal Top Up (Rp)", min_value=0, step=10000, key="topup_nominal")
+                with c_top3:
+                    transfer_note = st.text_area(
+                        "Catatan (Opsional)",
+                        value="Top up internal",
+                        height=85,
+                        key="topup_note"
+                    )
+                    saldo_sumber = wallet_balance_map.get(source_wallet, 0)
+                    st.caption(f"Saldo sumber saat ini: Rp {saldo_sumber:,.0f}")
+
+                if st.button("✅ Proses Top Up", type="primary", use_container_width=True):
+                    if transfer_nominal <= 0:
+                        st.error("Nominal top up harus lebih dari 0.")
+                    elif source_wallet == target_wallet:
+                        st.error("Wallet sumber dan tujuan harus berbeda.")
+                    elif transfer_nominal > saldo_sumber:
+                        st.error("Saldo wallet sumber tidak cukup untuk top up ini.")
+                    else:
+                        success, message = add_internal_transfer_optimized(
+                            transfer_date=transfer_date,
+                            nominal=transfer_nominal,
+                            source_wallet=source_wallet,
+                            target_wallet=target_wallet,
+                            note=transfer_note
+                        )
+                        if success:
+                            st.success(message)
+                            df, df_wallet_initial, df_target, df_recurring_initial = get_cached_data()
+                            st.rerun()
+                        else:
+                            st.error(message)
     
     # 🚀 NEW: Excel Export Button - Positioned after Input Transaction
     if not df_filtered.empty:
@@ -829,6 +987,50 @@ if selected_menu == "🏠 Dashboard":
                 st.plotly_chart(fig2, use_container_width=True)  # plotly_chart masih pakai use_container_width
             else:
                 st.caption("Belum ada data pengeluaran untuk chart ini.")
+
+        st.write("")
+        st.write("### 🌴 Analisis Pengeluaran Spesifik")
+        
+        # Ambil semua tanggal yang ada pengeluarannya
+        available_dates = df_filtered[df_filtered['Tipe'] == 'Pengeluaran']['Tanggal'].dt.date.unique()
+        # Defaultnya pilih yang weekend
+        default_dates = [d for d in available_dates if d.weekday() in [5, 6]]
+        
+        selected_dates = st.multiselect(
+            "Pilih Tanggal:", 
+            options=sorted(available_dates), 
+            default=default_dates,
+            format_func=lambda x: x.strftime('%d %b %Y')
+        )
+
+        df_spesifik = df_filtered[(df_filtered['Tipe'] == 'Pengeluaran') & (df_filtered['Tanggal'].dt.date.isin(selected_dates))]
+        df_spesifik = df_spesifik[~df_spesifik['Item'].str.contains('kos', case=False, na=False)] # Tetep filter "kos" wkw
+
+        if not df_spesifik.empty:
+            spesifik_expense = df_spesifik['Nominal'].sum()
+            total_expense = df_filtered[df_filtered['Tipe'] == 'Pengeluaran']['Nominal'].sum()
+            spesifik_pct = (spesifik_expense / total_expense) * 100 if total_expense > 0 else 0
+            
+            w1, w2 = st.columns(2)
+            with w1:
+                st.markdown(f"""<div style="background-color:rgba(239, 68, 68, 0.1); border-left:4px solid #EF4444; padding:15px; border-radius:10px;">
+                    <h4 style="margin:0; font-size:14px; color:#aaa;">💸 Pengeluaran Terpilih</h4>
+                    <h2 style="margin:10px 0 0 0; color:#EF4444;">Rp {spesifik_expense:,.0f}</h2>
+                    <p style="margin:5px 0 0 0; font-size:12px; opacity:0.8;">Berdasarkan tanggal yang dicentang</p>
+                </div>""", unsafe_allow_html=True)
+            with w2:
+                 st.markdown(f"""<div style="background-color:rgba(59, 130, 246, 0.1); border-left:4px solid #3B82F6; padding:15px; border-radius:10px;">
+                    <h4 style="margin:0; font-size:14px; color:#aaa;">📊 Porsi Terpilih</h4>
+                    <h2 style="margin:10px 0 0 0; color:#3B82F6;">{spesifik_pct:.1f}%</h2>
+                    <p style="margin:5px 0 0 0; font-size:12px; opacity:0.8;">Dari total pengeluaran periode ini</p>
+                </div>""", unsafe_allow_html=True)
+            
+            with st.expander("📝 Lihat Rincian Data"):
+                df_spesifik_show = df_spesifik[['Tanggal', 'Kategori', 'Item', 'Nominal', 'Metode Pembayaran']].copy()
+                df_spesifik_show['Tanggal'] = df_spesifik_show['Tanggal'].dt.strftime('%Y-%m-%d')
+                st.dataframe(df_spesifik_show.sort_values('Tanggal', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada pengeluaran di tanggal yang dipilih (atau cuma bayar kos aja wkw).")
 
 # ---------------- SCREEN 2: DOMPET SAYA ----------------
 elif selected_menu == "👛 Dompet Saya":
@@ -1516,7 +1718,7 @@ elif selected_menu == "📁 Data Lengkap":
     
     if not df.empty:
         # 🚀 OPTIMASI: Gunakan fungsi filter yang efisien
-        df_filtered_view = filter_data_efficient(df, selected_month, selected_year).sort_values('Tanggal', ascending=False)
+        df_filtered_view = sort_by_latest_record(filter_data_efficient(df, selected_month, selected_year))
     else:
         df_filtered_view = pd.DataFrame()
 
