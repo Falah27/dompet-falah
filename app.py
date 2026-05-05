@@ -68,7 +68,7 @@ st.set_page_config(page_title="Budget Bento Pro v15 Professional", page_icon="�
 
 # --- KONFIGURASI KATEGORI ---
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Pembayaran", "Penjualan", "Lainnya"]
-KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Amal", "Lainnya"]
+KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Lainnya"]
 KATEGORI_TRANSFER = "Transfer Internal"
 if KATEGORI_TRANSFER not in KATEGORI_PEMASUKAN:
     KATEGORI_PEMASUKAN.append(KATEGORI_TRANSFER)
@@ -710,6 +710,37 @@ if selected_menu == "🏠 Dashboard":
         global_in = df[df['Tipe'] == 'Pemasukan']['Nominal'].sum()
         global_out = df[df['Tipe'] == 'Pengeluaran']['Nominal'].sum()
         current_balance = global_in - global_out 
+        
+        # Hitung periode gajian: 25 bulan lalu s.d 24 bulan ini
+        month_idx = list(calendar.month_name).index(selected_month)
+        if month_idx == 1:
+            prev_month = 12
+            prev_year = selected_year - 1
+        else:
+            prev_month = month_idx - 1
+            prev_year = selected_year
+            
+        start_gajian = datetime(prev_year, prev_month, 25)
+        end_gajian = datetime(selected_year, month_idx, 24, 23, 59, 59)
+        
+        df_pengeluaran_gajian = df[
+            (df['Tipe'] == 'Pengeluaran') &
+            (df['Tanggal'] >= start_gajian) &
+            (df['Tanggal'] <= end_gajian)
+        ]
+        period_out_gajian = df_pengeluaran_gajian['Nominal'].sum()
+
+        # Hitung pengeluaran full 1 bulan kalender ini
+        start_bulan_ini = datetime(selected_year, month_idx, 1)
+        _, last_day = calendar.monthrange(selected_year, month_idx)
+        end_bulan_ini = datetime(selected_year, month_idx, last_day, 23, 59, 59)
+        
+        df_pengeluaran_bulan_ini = df[
+            (df['Tipe'] == 'Pengeluaran') &
+            (df['Tanggal'] >= start_bulan_ini) &
+            (df['Tanggal'] <= end_bulan_ini)
+        ]
+        period_out_bulan_ini = df_pengeluaran_bulan_ini['Nominal'].sum()
 
         period_in = df_filtered[df_filtered['Tipe'] == 'Pemasukan']['Nominal'].sum()
         period_gaji = df_filtered[(df_filtered['Tipe'] == 'Pemasukan') & (df_filtered['Kategori'] == 'Gaji')]['Nominal'].sum()
@@ -723,14 +754,16 @@ if selected_menu == "🏠 Dashboard":
             st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan (Periode)</div><div class="card-value">+ Rp {period_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
 
         with c2:
-            st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">📉 Pengeluaran (Periode)</div><div class="card-value">- Rp {period_out:,.0f}</div></div></div>""", unsafe_allow_html=True)
+            indo_months_abbr = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"]
+            label_pengeluaran = f"📉 Pengeluaran ({indo_months_abbr[prev_month]} - {indo_months_abbr[month_idx]})"
+            st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">{label_pengeluaran}</div><div class="card-value">- Rp {period_out_gajian:,.0f}</div></div></div>""", unsafe_allow_html=True)
             with st.popover("Lihat Rincian Dompet 💳", use_container_width=True):
-                if period_out > 0:
-                    df_methods = df_filtered[df_filtered['Tipe'] == 'Pengeluaran'].groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
+                if period_out_gajian > 0:
+                    df_methods = df_pengeluaran_gajian.groupby('Metode Pembayaran')['Nominal'].sum().reset_index()
                     for _, row in df_methods.iterrows():
                         st.markdown(f"<div style='display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #333;'><span>{row['Metode Pembayaran']}</span><b>Rp {row['Nominal']:,.0f}</b></div>", unsafe_allow_html=True)
                 else:
-                    st.info("Belum ada pengeluaran.")
+                    st.info("Belum ada pengeluaran di periode ini.")
 
         c3, c4 = st.columns(2)
         with c3:
@@ -774,10 +807,7 @@ if selected_menu == "🏠 Dashboard":
                 st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
 
         with c4:
-            net_flow = period_gaji - period_out
-            net_flow_str = f"+ Rp {net_flow:,.0f}" if net_flow >= 0 else f"- Rp {abs(net_flow):,.0f}"
-            net_flow_class = "bento-card-green" if net_flow >= 0 else "bento-card-red"
-            st.markdown(f"""<div class="{net_flow_class}"><div><div class="card-label">⚖️ Gaji - Pengeluaran</div><div class="card-value">{net_flow_str}</div></div><div class="card-detail">Periode Terpilih</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">📉 Pengeluaran Bulan Ini</div><div class="card-value">- Rp {period_out_bulan_ini:,.0f}</div></div><div class="card-detail">1 {selected_month} - {last_day} {selected_month}</div></div>""", unsafe_allow_html=True)
         
         # Info tracking aktif (jika ada)
         if hasattr(st.session_state, 'monitor_active') and st.session_state.monitor_active:
