@@ -68,7 +68,7 @@ st.set_page_config(page_title="Budget Bento Pro v15 Professional", page_icon="�
 
 # --- KONFIGURASI KATEGORI ---
 KATEGORI_PEMASUKAN = ["Gaji", "Bonus", "Hadiah", "Pembayaran", "Penjualan", "Lainnya"]
-KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Lainnya"]
+KATEGORI_PENGELUARAN = ["Makan", "Jajan", "Belanja", "Hiburan", "Transport", "Kesehatan", "Tagihan", "Amal", "Saving", "Lainnya"]
 KATEGORI_TRANSFER = "Transfer Internal"
 if KATEGORI_TRANSFER not in KATEGORI_PEMASUKAN:
     KATEGORI_PEMASUKAN.append(KATEGORI_TRANSFER)
@@ -730,6 +730,13 @@ if selected_menu == "🏠 Dashboard":
         ]
         period_out_gajian = df_pengeluaran_gajian['Nominal'].sum()
 
+        df_pemasukan_gajian = df[
+            (df['Tipe'] == 'Pemasukan') &
+            (df['Tanggal'] >= start_gajian) &
+            (df['Tanggal'] <= end_gajian)
+        ]
+        period_in_gajian = df_pemasukan_gajian['Nominal'].sum()
+
         # Hitung pengeluaran full 1 bulan kalender ini
         start_bulan_ini = datetime(selected_year, month_idx, 1)
         _, last_day = calendar.monthrange(selected_year, month_idx)
@@ -751,10 +758,11 @@ if selected_menu == "🏠 Dashboard":
 
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">📈 Pemasukan (Periode)</div><div class="card-value">+ Rp {period_in:,.0f}</div></div></div>""", unsafe_allow_html=True)
+            indo_months_abbr = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"]
+            label_pemasukan = f"📈 Pemasukan ({indo_months_abbr[prev_month]} - {indo_months_abbr[month_idx]})"
+            st.markdown(f"""<div class="bento-card-green"><div><div class="card-label">{label_pemasukan}</div><div class="card-value">+ Rp {period_in_gajian:,.0f}</div></div></div>""", unsafe_allow_html=True)
 
         with c2:
-            indo_months_abbr = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"]
             label_pengeluaran = f"📉 Pengeluaran ({indo_months_abbr[prev_month]} - {indo_months_abbr[month_idx]})"
             st.markdown(f"""<div class="bento-card-red"><div><div class="card-label">{label_pengeluaran}</div><div class="card-value">- Rp {period_out_gajian:,.0f}</div></div></div>""", unsafe_allow_html=True)
             with st.popover("Lihat Rincian Dompet 💳", use_container_width=True):
@@ -803,8 +811,9 @@ if selected_menu == "🏠 Dashboard":
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                # Default: tampilkan saldo real global
-                st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Real)</div><div class="card-value">Rp {current_balance:,.0f}</div></div><div class="card-detail">Total Aset di Semua Dompet</div></div>""", unsafe_allow_html=True)
+                # Menampilkan saldo periode (Pemasukan Periode - Pengeluaran Periode)
+                sisa_saldo_periode = period_in_gajian - period_out_gajian
+                st.markdown(f"""<div class="bento-card-blue"><div><div class="card-label">💰 Sisa Saldo (Periode)</div><div class="card-value">Rp {sisa_saldo_periode:,.0f}</div></div><div class="card-detail">Sisa dari tanggal 25 - 24</div></div>""", unsafe_allow_html=True)
 
         with c4:
             st.markdown(f"""<div class="bento-card-warning"><div><div class="card-label">📉 Pengeluaran Bulan Ini</div><div class="card-value">- Rp {period_out_bulan_ini:,.0f}</div></div><div class="card-detail">1 {selected_month} - {last_day} {selected_month}</div></div>""", unsafe_allow_html=True)
